@@ -80,7 +80,23 @@ a{color:var(--gold)}
 .meihua-gua .detail{font-size:.78rem;color:var(--text-dim)}
 
 /* AI */
-.ai-result{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:16px;min-height:60px;white-space:pre-wrap;font-size:.92rem;line-height:1.8}
+.ai-result{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:16px;min-height:60px;font-size:.92rem;line-height:1.8}
+/* Markdown 渲染样式 */
+.ai-result h1,.ai-result h2,.ai-result h3{margin:12px 0 6px;color:var(--gold)}
+.ai-result h1{font-size:1.3rem;border-bottom:1px solid var(--border);padding-bottom:6px}
+.ai-result h2{font-size:1.15rem}
+.ai-result h3{font-size:1.05rem}
+.ai-result p{margin:6px 0;line-height:1.8}
+.ai-result ul,.ai-result ol{padding-left:20px;margin:6px 0}
+.ai-result li{margin:3px 0}
+.ai-result strong{color:var(--gold);font-weight:700}
+.ai-result em{color:var(--text-dim)}
+.ai-result code{background:var(--bg);padding:2px 5px;border-radius:3px;font-size:.88rem}
+.ai-result blockquote{border-left:3px solid var(--gold-dim);padding:6px 12px;color:var(--text-dim);margin:8px 0}
+.ai-result table{width:100%;border-collapse:collapse;margin:8px 0;font-size:.85rem}
+.ai-result th,.ai-result td{border:1px solid var(--border);padding:5px 8px;text-align:left}
+.ai-result th{background:var(--bg2);color:var(--gold)}
+.ai-result hr{border:none;border-top:1px solid var(--border);margin:10px 0}
 .ai-result .cursor{display:inline-block;width:2px;height:1em;background:var(--gold);animation:blink .8s step-end infinite;vertical-align:text-bottom}
 @keyframes blink{50%{opacity:0}}
 
@@ -97,6 +113,9 @@ a{color:var(--gold)}
   .pillars{gap:6px}.pillar{padding:6px 8px;min-width:55px}
 }
 </style>
+<!-- Markdown 解析器 + XSS 防护 -->
+<script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
 </head>
 <body>
 
@@ -326,13 +345,18 @@ async function streamSSE(url, body, el){
       if(!line.startsWith('data:'))continue;
       try{
         const obj=JSON.parse(line.slice(5).trim());
-        if(obj.token){fullText+=obj.token;el.innerHTML=fullText+'<span class="cursor"></span>'}
-        else if(obj.error){fullText+='\n\n[错误] '+obj.error;el.innerHTML=fullText}
-        else if(obj.done){el.innerHTML=fullText}
+        if(obj.token){fullText+=obj.token;if(typeof marked!=='undefined'&&typeof DOMPurify!=='undefined'){el.innerHTML=DOMPurify.sanitize(marked.parse(fullText))+'<span class="cursor"></span>'}else{el.innerHTML=fullText.replace(/\n/g,'<br>')+'<span class="cursor"></span>'}}
+        else if(obj.error){fullText+='\n\n[错误] '+obj.error;if(typeof marked!=='undefined'&&typeof DOMPurify!=='undefined'){el.innerHTML=DOMPurify.sanitize(marked.parse(fullText))}else{el.innerHTML=fullText.replace(/\n/g,'<br>')}}
       }catch{}
     }
   }
-  if(el.querySelector('.cursor'))el.innerHTML=fullText;
+  // 流式结束后统一解析 Markdown
+  if(typeof marked!=='undefined'&&typeof DOMPurify!=='undefined'){
+    const rawHtml=marked.parse(fullText);
+    el.innerHTML=DOMPurify.sanitize(rawHtml);
+  }else{
+    el.innerHTML=fullText.replace(/\n/g,'<br>');
+  }
   return fullText;
 }
 
