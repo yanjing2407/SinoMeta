@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>术数预测系统</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0f0f1a;--bg2:#1a1a2e;--card:#1e1e32;--gold:#e2b969;--gold-dim:#a8863a;--red:#c0392b;--text:#f0e6d3;--text-dim:#a89b8c;--border:#3a3a52;--radius:8px}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Noto Serif SC',serif;background:var(--bg);color:var(--text);min-height:100vh;line-height:1.6}
+a{color:var(--gold)}
+
+.header{text-align:center;padding:28px 16px 14px;border-bottom:1px solid var(--border);background:linear-gradient(180deg,#12121f,var(--bg))}
+.header h1{font-size:1.9rem;color:var(--gold);letter-spacing:.3em}
+.header p{color:var(--text-dim);font-size:.85rem;margin-top:2px}
+
+.container{max-width:900px;margin:0 auto;padding:20px 14px}
+
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:16px;overflow:hidden}
+.card-title{padding:12px 16px;color:var(--gold);font-size:.95rem;cursor:pointer;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);user-select:none}
+.card-title:hover{background:rgba(226,185,105,.05)}
+.card-title .arrow{transition:transform .2s;font-size:.7rem}
+.card-title.collapsed .arrow{transform:rotate(-90deg)}
+.card-body{padding:16px}
+.card-body.hidden{display:none}
+
+.form-row{display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.form-group{flex:1;min-width:100px}
+.form-group label{display:block;font-size:.82rem;color:var(--text-dim);margin-bottom:3px}
+.form-group input,.form-group select,.form-group textarea{width:100%;padding:7px 10px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:inherit;font-size:.9rem}
+.form-group input:focus,.form-group select:focus{outline:none;border-color:var(--gold)}
+.form-group textarea{resize:vertical;min-height:56px}
+
+.method-group{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+.method-btn{padding:6px 16px;border:1px solid var(--border);border-radius:20px;background:transparent;color:var(--text-dim);cursor:pointer;font-family:inherit;font-size:.85rem;transition:all .2s}
+.method-btn:hover{border-color:var(--gold-dim);color:var(--text)}
+.method-btn.active{border-color:var(--gold);color:var(--gold);background:rgba(226,185,105,.1)}
+
+.btn-row{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
+.btn{padding:9px 24px;border:1px solid var(--gold-dim);border-radius:4px;background:transparent;color:var(--gold);font-family:inherit;font-size:.95rem;cursor:pointer;transition:all .2s}
+.btn:hover{background:var(--gold);color:var(--bg)}
+.btn-primary{background:var(--gold);color:var(--bg);font-weight:700}
+.btn-primary:hover{background:#f0c97a}
+.btn-red{border-color:var(--red);color:#e88}
+.btn-red:hover{background:var(--red);color:#fff}
+.btn:disabled{opacity:.35;cursor:not-allowed}
+
+.section-label{font-size:.85rem;color:var(--text-dim);border-left:3px solid var(--gold-dim);padding-left:8px;margin:12px 0 8px}
+
+/* Bazi */
+.pillars{display:flex;gap:10px;justify-content:center;margin:8px 0}
+.pillar{text-align:center;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:8px 14px;min-width:70px}
+.pillar .pos{font-size:.75rem;color:var(--text-dim)}
+.pillar .gz{font-size:1.3rem;color:var(--gold);font-weight:700;margin:2px 0}
+.pillar .ss{font-size:.75rem;color:var(--text-dim)}
+
+/* Qimen */
+.qimen-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;max-width:540px;margin:8px auto}
+.qimen-cell{background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:6px;text-align:center;font-size:.78rem;line-height:1.5}
+.qimen-cell .gua{font-weight:700;color:var(--gold);font-size:.85rem}
+.qimen-cell .fw{color:var(--text-dim);font-size:.72rem}
+.qimen-cell .tian{color:#7ec8e3}.qimen-cell .di{color:#a3d977}
+.qimen-cell .xing{color:#e8a87c}.qimen-cell .men{color:#d4a5e5}.qimen-cell .shen{color:#f7dc6f}
+.qimen-cell .ji{color:var(--gold);font-size:.72rem}.qimen-cell .xiong{color:var(--red);font-size:.72rem}
+
+/* Liuyao */
+.liuyao-table{width:100%;border-collapse:collapse;margin:8px 0;font-size:.85rem}
+.liuyao-table th,.liuyao-table td{border:1px solid var(--border);padding:5px 8px;text-align:center}
+.liuyao-table th{background:var(--bg2);color:var(--gold)}
+.dong{color:var(--red);font-weight:700}
+.shi-mark{color:var(--gold)}.ying-mark{color:#7ec8e3}
+
+/* Meihua */
+.meihua-row{display:flex;gap:10px;margin:8px 0;flex-wrap:wrap}
+.meihua-gua{flex:1;min-width:120px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px;text-align:center}
+.meihua-gua .label{font-size:.8rem;color:var(--text-dim)}
+.meihua-gua .name{font-size:1.1rem;color:var(--gold);font-weight:700;margin:2px 0}
+.meihua-gua .detail{font-size:.78rem;color:var(--text-dim)}
+
+/* AI */
+.ai-result{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:16px;min-height:60px;white-space:pre-wrap;font-size:.92rem;line-height:1.8}
+.ai-result .cursor{display:inline-block;width:2px;height:1em;background:var(--gold);animation:blink .8s step-end infinite;vertical-align:text-bottom}
+@keyframes blink{50%{opacity:0}}
+
+.toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--gold);color:var(--bg);padding:8px 24px;border-radius:20px;font-size:.9rem;opacity:0;transition:all .3s;z-index:999;pointer-events:none}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+.footer{text-align:center;padding:18px;color:var(--text-dim);font-size:.75rem;border-top:1px solid var(--border);margin-top:32px}
+
+@media(max-width:600px){
+  .form-row{flex-direction:column}
+  .form-group{min-width:100%}
+  .header h1{font-size:1.4rem;letter-spacing:.1em}
+  .qimen-grid{font-size:.7rem}.qimen-cell{padding:3px}
+  .pillars{gap:6px}.pillar{padding:6px 8px;min-width:55px}
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>术数预测</h1>
+  <p>八字 · 奇门遁甲 · 六爻 · 梅花易数 — AI 综合解读</p>
+</div>
+
+<div class="container">
+
+  <!-- LLM Config -->
+  <div class="card">
+    <div class="card-title" onclick="toggleCard(this)"><span>大模型配置</span><span class="arrow">▼</span></div>
+    <div class="card-body hidden" id="configBody">
+      <div class="form-row">
+        <div class="form-group" style="flex:2"><label>API Key</label><input type="password" id="llm_api_key" placeholder="sk-..."></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group" style="flex:2"><label>Base URL</label><input type="text" id="llm_base_url" value="https://api.deepseek.com"></div>
+        <div class="form-group" style="flex:1"><label>模型</label><input type="text" id="llm_model" value="deepseek-chat"></div>
+      </div>
+      <button class="btn" onclick="saveLLMConfig()" style="margin-top:4px">保存配置</button>
+      <p style="font-size:.75rem;color:var(--text-dim);margin-top:6px">配置保存在浏览器本地，不会上传服务器。</p>
+    </div>
+  </div>
+
+  <!-- Divination Form -->
+  <div class="card">
+    <div class="card-title" style="cursor:default"><span>起卦</span></div>
+    <div class="card-body">
+      <div class="form-row">
+        <div class="form-group" style="flex:3;min-width:100%">
+          <label>请问何事</label>
+          <textarea id="event" placeholder="输入你想预测的事情，如：今年创业能成功吗？"></textarea>
+        </div>
+      </div>
+
+      <!-- 起卦时间 -->
+      <div class="section-label">起卦时间（自动取当前时刻，可手动修改）</div>
+      <div class="form-row">
+        <div class="form-group"><label>日期</label><input type="date" id="q_date"></div>
+        <div class="form-group"><label>时间</label><input type="time" id="q_time"></div>
+        <div class="form-group" style="flex:0 0 auto;align-self:flex-end"><button class="btn" onclick="refreshTime()" style="padding:7px 12px;font-size:.82rem">此刻</button></div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group"><label>经度</label><input type="number" id="q_lng" step="0.1" value="116.4"></div>
+        <div class="form-group"><label>纬度</label><input type="number" id="q_lat" step="0.1" value="39.9"></div>
+        <div class="form-group"><label>性别</label>
+          <select id="q_gender"><option value="男">男</option><option value="女">女</option></select>
+        </div>
+      </div>
+
+      <!-- 出生时间（八字专用） -->
+      <div class="section-label">出生时间（八字排盘专用，不填则用起卦时间）</div>
+      <div class="form-row">
+        <div class="form-group"><label>出生年</label><input type="number" id="b_year" placeholder="如1990"></div>
+        <div class="form-group"><label>月</label><input type="number" id="b_month" min="1" max="12" placeholder="1-12"></div>
+        <div class="form-group"><label>日</label><input type="number" id="b_day" min="1" max="31" placeholder="1-31"></div>
+        <div class="form-group"><label>时</label><input type="number" id="b_hour" min="0" max="23" placeholder="0-23"></div>
+        <div class="form-group"><label>分</label><input type="number" id="b_minute" min="0" max="59" placeholder="0-59"></div>
+      </div>
+
+      <!-- 术数方法 -->
+      <div class="form-group">
+        <label>选择术数</label>
+        <div class="method-group" id="methodGroup">
+          <button class="method-btn active" data-val="八字" onclick="toggleMethod(this)">八字</button>
+          <button class="method-btn active" data-val="奇门" onclick="toggleMethod(this)">奇门遁甲</button>
+          <button class="method-btn" data-val="六爻" onclick="toggleMethod(this)">六爻</button>
+          <button class="method-btn active" data-val="梅花" onclick="toggleMethod(this)">梅花易数</button>
+        </div>
+      </div>
+
+      <!-- 起卦参数（可选） -->
+      <div class="section-label">起卦参数（可选，不填则用时间自动起卦）</div>
+      <div class="form-row">
+        <div class="form-group"><label>六爻数字1</label><input type="number" id="liuyao_n1" placeholder="如6"></div>
+        <div class="form-group"><label>六爻数字2</label><input type="number" id="liuyao_n2" placeholder="如8"></div>
+        <div class="form-group"><label>梅花数字1</label><input type="number" id="meihua_n1" placeholder="如3"></div>
+        <div class="form-group"><label>梅花数字2</label><input type="number" id="meihua_n2" placeholder="如7"></div>
+        <div class="form-group"><label>方位角</label><input type="number" id="q_azimuth" step="1" min="0" max="360" placeholder="0-360"></div>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-primary" id="btnDivine" onclick="doDivine()">起卦</button>
+        <button class="btn" id="btnInterpret" onclick="doInterpret()">起盘 + 解卦</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Results -->
+  <div id="resultArea" style="display:none">
+    <div class="card" id="baziCard" style="display:none">
+      <div class="card-title" onclick="toggleCard(this)"><span>四柱八字</span><span class="arrow">▼</span></div>
+      <div class="card-body" id="baziResult"></div>
+    </div>
+    <div class="card" id="qimenCard" style="display:none">
+      <div class="card-title" onclick="toggleCard(this)"><span>奇门遁甲</span><span class="arrow">▼</span></div>
+      <div class="card-body" id="qimenResult"></div>
+    </div>
+    <div class="card" id="liuyaoCard" style="display:none">
+      <div class="card-title" onclick="toggleCard(this)"><span>六爻</span><span class="arrow">▼</span></div>
+      <div class="card-body" id="liuyaoResult"></div>
+    </div>
+    <div class="card" id="meihuaCard" style="display:none">
+      <div class="card-title" onclick="toggleCard(this)"><span>梅花易数</span><span class="arrow">▼</span></div>
+      <div class="card-body" id="meihuaResult"></div>
+    </div>
+    <div class="card" id="aiCard" style="display:none">
+      <div class="card-title" onclick="toggleCard(this)"><span>AI 解卦</span><span class="arrow">▼</span></div>
+      <div class="card-body"><div class="ai-result" id="aiResult"></div></div>
+    </div>
+    <div class="card" id="adviceCard" style="display:none">
+      <div class="card-title" onclick="toggleCard(this)"><span>破局建议</span><span class="arrow">▼</span></div>
+      <div class="card-body"><div class="ai-result" id="adviceResult"></div></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<div class="footer">术数预测系统 · 排盘由算法完成，解读由大模型生成 · 仅供参考，切勿迷信</div>
+
+<script>
+function $(id){return document.getElementById(id)}
+function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500)}
+function toggleCard(el){el.classList.toggle('collapsed');const b=el.nextElementSibling;b.classList.toggle('hidden')}
+function toggleMethod(el){el.classList.toggle('active')}
+function getMethods(){return[...document.querySelectorAll('#methodGroup .method-btn.active')].map(e=>e.dataset.val)}
+
+// ===== LLM Config =====
+function loadLLMConfig(){
+  $('llm_base_url').value=localStorage.getItem('llm_base_url')||'https://api.deepseek.com';
+  $('llm_model').value=localStorage.getItem('llm_model')||'deepseek-chat';
+  $('llm_api_key').value=localStorage.getItem('llm_api_key')||'';
+}
+function saveLLMConfig(){
+  localStorage.setItem('llm_base_url',$('llm_base_url').value);
+  localStorage.setItem('llm_model',$('llm_model').value);
+  localStorage.setItem('llm_api_key',$('llm_api_key').value);
+  toast('配置已保存');
+}
+
+// ===== DateTime =====
+function refreshTime(){
+  const now=new Date();
+  const y=now.getFullYear();
+  const m=String(now.getMonth()+1).padStart(2,'0');
+  const d=String(now.getDate()).padStart(2,'0');
+  $('q_date').value=`${y}-${m}-${d}`;
+  $('q_time').value=now.toTimeString().slice(0,5);
+}
+function getDateTime(){
+  const now=new Date();
+  const fallbackDate=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  const d=$('q_date').value||fallbackDate;
+  const t=$('q_time').value||'12:00';
+  const[year,month,day]=d.split('-').map(Number);
+  const[hour,minute]=t.split(':').map(Number);
+  return{year,month,day,hour,minute:minute||0};
+}
+function getBirthTime(){
+  const y=parseInt($('b_year').value)||0;
+  const m=parseInt($('b_month').value)||0;
+  const d=parseInt($('b_day').value)||0;
+  const h=parseInt($('b_hour').value);
+  const min=parseInt($('b_minute').value)||0;
+  if(y&&m&&d&&!isNaN(h)) return{year:y,month:m,day:d,hour:h,minute:min};
+  return null;
+}
+
+// ===== Build Request =====
+function buildRequest(){
+  const event=$('event').value.trim();
+  if(!event){toast('请输入事件描述');return null}
+  const methods=getMethods();
+  if(!methods.length){toast('请至少选择一种术数');return null}
+  const dt=getDateTime();
+  const req={
+    event,methods,
+    year:dt.year,month:dt.month,day:dt.day,hour:dt.hour,minute:dt.minute,
+    longitude:parseFloat($('q_lng').value)||116.4,
+    latitude:parseFloat($('q_lat').value)||39.9,
+    gender:$('q_gender').value,
+  };
+  // 出生时间
+  const birth=getBirthTime();
+  if(birth){
+    req.birth_year=birth.year;
+    req.birth_month=birth.month;
+    req.birth_day=birth.day;
+    req.birth_hour=birth.hour;
+    req.birth_minute=birth.minute;
+  }
+  // 起卦参数
+  const ln1=parseInt($('liuyao_n1').value);
+  const ln2=parseInt($('liuyao_n2').value);
+  if(!isNaN(ln1)&&!isNaN(ln2)) req.liuyao_nums=[ln1,ln2];
+  const mn1=parseInt($('meihua_n1').value);
+  const mn2=parseInt($('meihua_n2').value);
+  if(!isNaN(mn1)&&!isNaN(mn2)) req.meihua_nums=[mn1,mn2];
+  const az=parseFloat($('q_azimuth').value);
+  if(!isNaN(az)) req.azimuth=az;
+  return req;
+}
+
+// ===== API =====
+async function apiDivine(req){
+  const res=await fetch('/api/divine',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(req)});
+  if(!res.ok) throw new Error(await res.text());
+  return await res.json();
+}
+
+// ===== SSE Stream Helper =====
+async function streamSSE(url, body, el){
+  const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!res.ok) throw new Error(await res.text());
+  const reader=res.body.getReader();
+  const decoder=new TextDecoder();
+  let fullText='';let buffer='';
+  while(true){
+    const{done,value}=await reader.read();
+    if(done)break;
+    buffer+=decoder.decode(value,{stream:true});
+    const lines=buffer.split('\n');buffer=lines.pop();
+    for(const line of lines){
+      if(!line.startsWith('data:'))continue;
+      try{
+        const obj=JSON.parse(line.slice(5).trim());
+        if(obj.token){fullText+=obj.token;el.innerHTML=fullText+'<span class="cursor"></span>'}
+        else if(obj.error){fullText+='\n\n[错误] '+obj.error;el.innerHTML=fullText}
+        else if(obj.done){el.innerHTML=fullText}
+      }catch{}
+    }
+  }
+  if(el.querySelector('.cursor'))el.innerHTML=fullText;
+  return fullText;
+}
+
+// ===== Render =====
+function renderBaZi(data){
+  if(!data||data['错误']){$('baziCard').style.display='none';return}
+  $('baziCard').style.display='';
+  const p=data['四柱']||{};const ss=data['十神']||{};
+  const pos=['年柱','月柱','日柱','时柱'];
+  let h='<div class="pillars">';
+  for(const k of pos){
+    h+=`<div class="pillar"><div class="pos">${k}</div><div class="gz">${p[k]||'--'}</div><div class="ss">${k==='日柱'?'日主':(ss[k]?.天干||'')}</div></div>`;
+  }
+  h+='</div>';
+  h+=`<div style="margin-top:6px;font-size:.85rem">日主：<strong>${data['日主五行']||''} ${data['日主阴阳']||''}</strong> · ${data['日主强弱']?.判断||''}（${data['日主强弱']?.说明||''}）</div>`;
+  const wx=data['五行力量']||{};
+  const total=Object.values(wx).reduce((a,b)=>a+b,0)||1;
+  h+='<div style="margin-top:4px;font-size:.82rem">五行：';
+  const wxColor={'木':'#90ee90','火':'#ffa07a','土':'#f0e6d3','金':'#b0c4de','水':'#87ceeb'};
+  for(const[k,v]of Object.entries(wx)) h+=`<span style="color:${wxColor[k]||''}">${k}${(v/total*100).toFixed(0)}%</span> `;
+  h+='</div>';
+  const ss2=data['神煞']||{};const ssStr=[];
+  if(ss2['天乙贵人']?.length) ssStr.push('天乙贵人:'+ss2['天乙贵人'].join(','));
+  if(ss2['驿马']?.length) ssStr.push('驿马:'+ss2['驿马'].join(','));
+  if(ss2['桃花']?.length) ssStr.push('桃花:'+ss2['桃花'].join(','));
+  if(ss2['旬空']?.length) ssStr.push('旬空:'+ss2['旬空'].join(','));
+  if(ssStr.length) h+=`<div style="margin-top:3px;color:var(--text-dim);font-size:.8rem">${ssStr.join(' · ')}</div>`;
+  $('baziResult').innerHTML=h;
+}
+
+function renderQiMen(data){
+  if(!data||data['错误']){$('qimenCard').style.display='none';return}
+  $('qimenCard').style.display='';
+  let h=`<div style="margin-bottom:6px;font-size:.88rem">${data['遁型']||''}${data['局数']||''}局 · 值符:${data['值符星']||''} · 值使:${data['值使门']||''} · 日:${data['日干支']||''} · 时:${data['时干支']||''}`;
+  if(data['旬空']?.length) h+=` · 旬空:${data['旬空'].join(',')}`;
+  h+='</div>';
+  const grid=[4,9,2,3,5,7,8,1,6];const palaces=data['九宫']||{};
+  h+='<div class="qimen-grid">';
+  for(const gong of grid){
+    if(gong===5){h+=`<div class="qimen-cell" style="border-color:var(--gold-dim)"><div class="gua">中五宫</div><div class="fw">中</div></div>`;continue}
+    const p=palaces[gong]||{};
+    const xj=p['星吉凶']==='吉'?'<span class="ji">吉</span>':p['星吉凶']==='凶'?'<span class="xiong">凶</span>':'';
+    const mj=p['门吉凶']==='吉'?'<span class="ji">吉</span>':p['门吉凶']==='凶'?'<span class="xiong">凶</span>':'';
+    h+=`<div class="qimen-cell"><div class="gua">${p['八卦']||''}</div><div class="fw">${p['方位']||''}</div><div class="tian">天:${p['天盘']||''}</div><div class="di">地:${p['地盘']||''}</div><div class="xing">星:${p['九星']||''}${xj}</div><div class="men">门:${p['八门']||''}${mj}</div><div class="shen">神:${p['八神']||''}</div></div>`;
+  }
+  h+='</div>';
+  const geju=data['格局']||[];
+  if(geju.length) h+=`<div style="font-size:.8rem;color:var(--text-dim);margin-top:4px">格局：${geju.join('；')}</div>`;
+  $('qimenResult').innerHTML=h;
+}
+
+function renderLiuYao(data){
+  if(!data||data['错误']){$('liuyaoCard').style.display='none';return}
+  $('liuyaoCard').style.display='';
+  let h=`<div style="margin-bottom:6px;font-size:.88rem">${data['卦名']||''} · ${data['宫属']||''} · 月建:${data['月建']||''} · 日建:${data['日建']||''}`;
+  if(data['月破地支']) h+=` · 月破:${data['月破地支']}`;
+  if(data['旬空地支']?.length) h+=` · 旬空:${data['旬空地支'].join(',')}`;
+  h+='</div>';
+  h+='<table class="liuyao-table"><thead><tr><th>爻</th><th>干支</th><th>六亲</th><th>五行</th><th>标记</th></tr></thead><tbody>';
+  for(const y of(data['六爻']||[])){
+    let m=[];
+    if(y['动爻']) m.push(`<span class="dong">动→${y['变支']||''}</span>`);
+    if(y['世']) m.push('<span class="shi-mark">世</span>');
+    if(y['应']) m.push('<span class="ying-mark">应</span>');
+    if(y['旬空']) m.push('空');
+    if(y['月破']) m.push('破');
+    h+=`<tr><td>${y['爻名']}爻</td><td>${y['干支']}</td><td>${y['六亲']}</td><td>${y['五行']}</td><td>${m.join(' ')}</td></tr>`;
+  }
+  h+='</tbody></table>';
+  $('liuyaoResult').innerHTML=h;
+}
+
+function renderMeiHua(data){
+  if(!data||data['错误']){$('meihuaCard').style.display='none';return}
+  $('meihuaCard').style.display='';
+  const bk=data['本卦']||{},hk=data['互卦']||{},ck=data['变卦']||{},ty=data['体用分析']||{};
+  let h='<div class="meihua-row">';
+  h+=`<div class="meihua-gua"><div class="label">本卦</div><div class="name">${bk['卦名']||''}</div><div class="detail">${bk['上卦']||''}上 ${bk['下卦']||''}下</div></div>`;
+  h+=`<div class="meihua-gua"><div class="label">互卦</div><div class="name">${hk['卦名']||''}</div><div class="detail">${hk['上卦']||''}上 ${hk['下卦']||''}下</div></div>`;
+  h+=`<div class="meihua-gua"><div class="label">变卦</div><div class="name">${ck['卦名']||''}</div><div class="detail">${ck['上卦']||''}上 ${ck['下卦']||''}下</div></div>`;
+  h+='</div>';
+  h+=`<div style="margin-top:6px;font-size:.88rem">动爻：第${data['动爻']||'?'}爻 · 体：${ty['体卦']||''}(${ty['体五行']||''}) · 用：${ty['用卦']||''}(${ty['用五行']||''})</div>`;
+  h+=`<div style="font-size:.9rem;color:var(--gold);margin-top:4px">${ty['体用关系']||''} — ${ty['断语']||''}</div>`;
+  $('meihuaResult').innerHTML=h;
+}
+
+function renderResults(data){
+  $('resultArea').style.display='';
+  const r=data['术数结果']||{};
+  renderBaZi(r['八字']);
+  renderQiMen(r['奇门遁甲']);
+  renderLiuYao(r['六爻']);
+  renderMeiHua(r['梅花易数']);
+  $('resultArea').scrollIntoView({behavior:'smooth'});
+}
+
+// ===== Actions =====
+let lastDivineData=null;
+let lastRequest=null;
+
+function ensureAPIKey(){
+  const apiKey=$('llm_api_key').value||localStorage.getItem('llm_api_key')||'';
+  if(!apiKey){
+    const title=document.querySelector('#configBody').previousElementSibling;
+    if(title.nextElementSibling.classList.contains('hidden')) toggleCard(title);
+    toast('请先配置 API Key');
+    return null;
+  }
+  return apiKey;
+}
+
+function addLLMParams(req){
+  return{
+    ...req,
+    api_key:$('llm_api_key').value||localStorage.getItem('llm_api_key')||'',
+    base_url:$('llm_base_url').value||localStorage.getItem('llm_base_url')||'https://api.deepseek.com',
+    model:$('llm_model').value||localStorage.getItem('llm_model')||'deepseek-chat',
+  };
+}
+
+async function doDivine(){
+  const req=buildRequest();if(!req)return;
+  lastRequest=req;
+
+  const btn=$('btnDivine');btn.disabled=true;btn.textContent='起盘中...';
+  try{
+    const data=await apiDivine(req);
+    lastDivineData=data;
+    renderResults(data);
+  }catch(e){toast('起盘失败: '+e.message)}
+  finally{btn.disabled=false;btn.textContent='起卦'}
+}
+
+async function doInterpret(){
+  const apiKey=ensureAPIKey();if(!apiKey)return;
+  const req=buildRequest();if(!req)return;
+  lastRequest=req;
+
+  const btn=$('btnInterpret');btn.disabled=true;btn.textContent='处理中...';
+  try{
+    const data=await apiDivine(req);
+    lastDivineData=data;
+    renderResults(data);
+
+    $('aiCard').style.display='';
+    $('adviceCard').style.display='none';
+    const aiEl=$('aiResult');aiEl.innerHTML='<span class="cursor"></span>';
+    $('aiCard').scrollIntoView({behavior:'smooth'});
+
+    await streamSSE('/api/interpret', addLLMParams(req), aiEl);
+  }catch(e){toast('操作失败: '+e.message)}
+  finally{btn.disabled=false;btn.textContent='起盘 + 解卦'}
+}
+
+async function doAdvice(){
+  if(!lastDivineData){toast('请先起卦');return}
+  const apiKey=ensureAPIKey();if(!apiKey)return;
+
+  const btn=$('btnAdvice');btn.disabled=true;btn.textContent='分析中...';
+  try{
+    $('adviceCard').style.display='';
+    const advEl=$('adviceResult');advEl.innerHTML='<span class="cursor"></span>';
+    $('adviceCard').scrollIntoView({behavior:'smooth'});
+
+    await streamSSE('/api/advice', addLLMParams(lastRequest), advEl);
+  }catch(e){toast('操作失败: '+e.message)}
+  finally{btn.disabled=false;btn.textContent='破局建议'}
+}
+
+// ===== Init =====
+window.addEventListener('DOMContentLoaded',()=>{
+  loadLLMConfig();
+  refreshTime();
+});
+
+// 排盘结果出来后，动态插入破局建议按钮
+const origRenderResults=renderResults;
+renderResults=function(data){
+  origRenderResults(data);
+  // 在结果区末尾添加破局建议按钮（如果还没有）
+  if(!$('btnAdvice')){
+    const div=document.createElement('div');
+    div.style.cssText='text-align:center;margin:16px 0';
+    div.innerHTML='<button class="btn btn-red" id="btnAdvice" onclick="doAdvice()">破局建议</button>';
+    $('resultArea').appendChild(div);
+  }
+};
+</script>
+</body>
+</html>

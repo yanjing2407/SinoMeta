@@ -1,0 +1,7 @@
+术数系统/
+├── calendar_utils.py    # 基础历法（天干地支、真太阳时、节气）
+├── bazi.py              # 四柱八字
+├── qimen.py             # 奇门遁甲（时家奇门，拆补法）
+├── liuyao.py            # 六爻（纳甲筮法）
+├── meihua.py            # 梅花易数
+└── integrate.py         # 多术数融合 + Prompt生成

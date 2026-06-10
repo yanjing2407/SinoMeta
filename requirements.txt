@@ -1,0 +1,4 @@
+fastapi
+uvicorn
+openai
+lunar_python
