@@ -8,9 +8,13 @@ FastAPI 后端，提供起盘和解卦接口
 
 import sys
 import json
+import os
+import logging
+import uuid
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,10 +25,35 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).parent))
 
 from integrate import multi_divination, stream_interpret
+from llm_store import (
+    get_role_config,
+    init_db,
+    list_admin_config,
+    list_public_roles,
+    save_provider,
+    save_role,
+)
 
 STATIC_DIR = Path(__file__).parent / "static"
+LOG_PATH = Path(os.getenv("SINOMETA_LOG_PATH", Path(__file__).parent / "data" / "sinometa.log"))
+LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+logger = logging.getLogger("sinometa")
+logging.basicConfig(
+    level=os.getenv("SINOMETA_LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+if not any(isinstance(handler, RotatingFileHandler) for handler in logger.handlers):
+    file_handler = RotatingFileHandler(
+        LOG_PATH,
+        maxBytes=1024 * 1024,
+        backupCount=3,
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s"))
+    logger.addHandler(file_handler)
 
 app = FastAPI(title="术数起盘系统")
+init_db()
 
 # CORS（允许手机等设备访问）
 app.add_middleware(
@@ -59,9 +88,30 @@ class DivineRequest(BaseModel):
 
 
 class InterpretRequest(DivineRequest):
+    role_id: Optional[int] = None
+
+
+class ProviderPayload(BaseModel):
+    id: Optional[int] = None
+    name: str
+    provider_type: str = "openai_compatible"
+    base_url: str
+    model: str
     api_key: str = ""
-    base_url: str = "https://api.deepseek.com"
-    model: str = "deepseek-chat"
+    api_key_required: bool = True
+    is_active: bool = True
+    is_default: bool = False
+
+
+class RolePayload(BaseModel):
+    id: Optional[int] = None
+    name: str
+    avatar_style: str = ""
+    llm_provider_id: int
+    system_prompt: str
+    specialty: str = ""
+    is_active: bool = True
+    is_default: bool = False
 
 
 # ==================== 工具函数 ====================
@@ -74,6 +124,30 @@ def make_serializable(obj):
     if isinstance(obj, (int, float, str, bool, type(None))):
         return obj
     return str(obj)
+
+
+def require_admin(request: Request, authorization: str = Header(default="")):
+    token = os.getenv("SINOMETA_ADMIN_TOKEN", "").strip()
+    if not token:
+        host = (request.url.hostname or "").lower()
+        if host in {"127.0.0.1", "::1", "localhost"}:
+            return
+        raise HTTPException(status_code=403, detail="请先设置 SINOMETA_ADMIN_TOKEN")
+
+    expected = f"Bearer {token}"
+    if authorization != expected:
+        raise HTTPException(status_code=401, detail="后台令牌无效")
+
+
+def resolve_active_role(role_id: Optional[int]):
+    role = get_role_config(role_id)
+    if not role:
+        raise HTTPException(status_code=400, detail="角色不存在或已停用")
+    if not role["provider_active"]:
+        raise HTTPException(status_code=400, detail="角色关联的模型已停用")
+    if role["api_key_required"] and not role["api_key"]:
+        raise HTTPException(status_code=400, detail="请先在后台配置该角色关联模型的 API Key")
+    return role
 
 
 def do_multi_divination(req):
@@ -141,6 +215,11 @@ async def index():
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/admin")
+async def admin_page():
+    return FileResponse(STATIC_DIR / "admin.html")
+
+
 # ==================== API 路由 ====================
 
 @app.post("/api/divine")
@@ -150,25 +229,77 @@ async def divine(req: DivineRequest):
     return make_serializable(result)
 
 
+@app.get("/api/roles")
+async def roles():
+    """前台角色列表"""
+    return {"roles": list_public_roles()}
+
+
+@app.get("/api/admin/config")
+async def admin_config(request: Request, authorization: str = Header(default="")):
+    """后台配置列表"""
+    require_admin(request, authorization)
+    return list_admin_config()
+
+
+@app.post("/api/admin/providers")
+async def admin_save_provider(
+    payload: ProviderPayload, request: Request, authorization: str = Header(default="")
+):
+    """新增或更新模型配置"""
+    require_admin(request, authorization)
+    try:
+        return save_provider(payload.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/admin/roles")
+async def admin_save_role(
+    payload: RolePayload, request: Request, authorization: str = Header(default="")
+):
+    """新增或更新角色配置"""
+    require_admin(request, authorization)
+    try:
+        return save_role(payload.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.post("/api/interpret")
 async def interpret(req: InterpretRequest):
     """解卦接口（SSE流式）"""
-    if not req.api_key:
-        return {"error": "请先配置API Key"}
+    role = resolve_active_role(req.role_id)
 
     result = do_multi_divination(req)
+    trace_id = uuid.uuid4().hex[:8]
 
     def event_stream():
+        logger.info(
+            "LLM stream start trace=%s endpoint=interpret role=%s provider=%s type=%s model=%s base_url=%s",
+            trace_id,
+            role.get("role_name"),
+            role.get("provider_name"),
+            role.get("provider_type"),
+            role.get("model"),
+            role.get("base_url"),
+        )
         try:
             for token in stream_interpret(
                 result,
-                api_key=req.api_key, base_url=req.base_url, model=req.model,
+                api_key=role["api_key"],
+                base_url=role["base_url"],
+                model=role["model"],
+                system_prompt=role["system_prompt"],
+                provider_type=role["provider_type"],
                 prompt_type="interpret",
             ):
                 yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
+            logger.info("LLM stream done trace=%s endpoint=interpret", trace_id)
             yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
         except Exception as e:
-            yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+            logger.exception("LLM stream failed trace=%s endpoint=interpret", trace_id)
+            yield f"data: {json.dumps({'error': str(e), 'trace_id': trace_id}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -176,22 +307,37 @@ async def interpret(req: InterpretRequest):
 @app.post("/api/advice")
 async def advice(req: InterpretRequest):
     """破局建议接口（SSE流式）"""
-    if not req.api_key:
-        return {"error": "请先配置API Key"}
+    role = resolve_active_role(req.role_id)
 
     result = do_multi_divination(req)
+    trace_id = uuid.uuid4().hex[:8]
 
     def event_stream():
+        logger.info(
+            "LLM stream start trace=%s endpoint=advice role=%s provider=%s type=%s model=%s base_url=%s",
+            trace_id,
+            role.get("role_name"),
+            role.get("provider_name"),
+            role.get("provider_type"),
+            role.get("model"),
+            role.get("base_url"),
+        )
         try:
             for token in stream_interpret(
                 result,
-                api_key=req.api_key, base_url=req.base_url, model=req.model,
+                api_key=role["api_key"],
+                base_url=role["base_url"],
+                model=role["model"],
+                system_prompt=role["system_prompt"],
+                provider_type=role["provider_type"],
                 prompt_type="advice",
             ):
                 yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
+            logger.info("LLM stream done trace=%s endpoint=advice", trace_id)
             yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
         except Exception as e:
-            yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+            logger.exception("LLM stream failed trace=%s endpoint=advice", trace_id)
+            yield f"data: {json.dumps({'error': str(e), 'trace_id': trace_id}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 

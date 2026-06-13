@@ -7,13 +7,20 @@
 """
 
 import json
+import logging
+import urllib.error
+import urllib.request
 from datetime import date
+from urllib.parse import urlsplit, urlunsplit
 
 # 导入各术数模块（确保同目录下）
 from bazi import pa_pan as bazi_pa_pan
 from qimen import pa_pan as qimen_pa_pan
 from liuyao import pa_pan_by_time as liuyao_pa_pan, pa_pan_by_numbers as liuyao_pa_pan_num
 from meihua import pa_pan as meihua_pa_pan
+
+
+logger = logging.getLogger("sinometa")
 
 
 def multi_divination(
@@ -195,8 +202,212 @@ def generate_advice_prompt(multi_result: dict) -> str:
     return prompt
 
 
+def _build_llm_messages(multi_result: dict, prompt_type: str, system_prompt: str):
+    if prompt_type == "advice":
+        prompt = generate_advice_prompt(multi_result)
+        system_msg = system_prompt or "你是一位实战派术数顾问，擅长从传统术数中提炼出可操作的行动方案，帮助求测者趋吉避凶、破局开运。"
+    else:
+        prompt = generate_prompt(multi_result)
+        system_msg = system_prompt or "你是一位严谨、客观的传统术数综合研判AI，精通八字、奇门遁甲、六爻、梅花易数。"
+    return [
+        {"role": "system", "content": system_msg},
+        {"role": "user", "content": prompt},
+    ]
+
+
+def normalize_openai_base_url(base_url: str, append_v1: bool = False) -> str:
+    """Return an OpenAI SDK base_url, not a final /chat/completions endpoint."""
+    url = str(base_url or "").strip().rstrip("/")
+    if not url:
+        return url
+
+    parsed = urlsplit(url)
+    path = parsed.path.rstrip("/")
+    lower_path = path.lower()
+
+    suffix = "/chat/completions"
+    if lower_path.endswith(suffix):
+        path = path[: -len(suffix)] or ""
+
+    if append_v1 and not path:
+        path = "/v1"
+
+    return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
+
+
+def _openai_base_url_candidates(base_url: str):
+    primary = normalize_openai_base_url(base_url)
+    candidates = [primary]
+    parsed = urlsplit(primary)
+    if primary and not parsed.path.rstrip("/"):
+        candidates.append(normalize_openai_base_url(primary, append_v1=True))
+
+    unique = []
+    for item in candidates:
+        if item and item not in unique:
+            unique.append(item)
+    return unique
+
+
+def _openai_chat_url_candidates(base_url: str):
+    return [base.rstrip("/") + "/chat/completions" for base in _openai_base_url_candidates(base_url)]
+
+
+def _build_openai_payload(messages, model: str, stream: bool) -> bytes:
+    return json.dumps(
+        {
+            "model": model,
+            "messages": messages,
+            "temperature": 0.7,
+            "stream": stream,
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+
+
+def _openai_headers(api_key: str) -> dict:
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream, application/json",
+    }
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    return headers
+
+
+def _openai_request(url: str, payload: bytes, api_key: str):
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers=_openai_headers(api_key),
+        method="POST",
+    )
+    try:
+        return urllib.request.urlopen(req, timeout=180)
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"HTTP {e.code} {detail}; URL={url}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"{e.reason}; URL={url}") from e
+
+
+def _extract_openai_content(data: dict) -> str:
+    choices = data.get("choices") or []
+    if not choices:
+        return ""
+    choice = choices[0] or {}
+    delta = choice.get("delta") or {}
+    message = choice.get("message") or {}
+    return delta.get("content") or message.get("content") or choice.get("text") or ""
+
+
+def _iter_openai_stream(url: str, api_key: str, model: str, messages):
+    payload = _build_openai_payload(messages, model, stream=True)
+    with _openai_request(url, payload, api_key) as resp:
+        for raw_line in resp:
+            line = raw_line.decode("utf-8", errors="ignore").strip()
+            if not line:
+                continue
+            if line.startswith("data:"):
+                line = line[5:].strip()
+            if not line or line == "[DONE]" or not line.startswith("{"):
+                continue
+            data = json.loads(line)
+            content = _extract_openai_content(data)
+            if content:
+                yield content
+
+
+def _complete_openai_once(url: str, api_key: str, model: str, messages) -> str:
+    payload = _build_openai_payload(messages, model, stream=False)
+    with _openai_request(url, payload, api_key) as resp:
+        text = resp.read().decode("utf-8", errors="ignore")
+    data = json.loads(text)
+    return _extract_openai_content(data)
+
+
+def _stream_openai_compatible(messages, api_key: str, base_url: str, model: str):
+    urls = _openai_chat_url_candidates(base_url)
+    last_error = None
+
+    for url in urls:
+        yielded = False
+        try:
+            logger.info("OpenAI compatible stream request url=%s model=%s", url, model)
+            for token in _iter_openai_stream(url, api_key, model, messages):
+                yielded = True
+                yield token
+            if yielded:
+                return
+            last_error = RuntimeError(f"流式接口返回成功但没有输出内容；URL={url}")
+        except Exception as exc:
+            if yielded:
+                raise RuntimeError(f"OpenAI兼容接口流式输出中断：{exc}") from exc
+            last_error = exc
+            logger.warning(
+                "OpenAI compatible stream failed, trying non-stream fallback url=%s model=%s error=%s",
+                url,
+                model,
+                exc,
+            )
+
+        try:
+            logger.info("OpenAI compatible non-stream fallback request url=%s model=%s", url, model)
+            content = _complete_openai_once(url, api_key, model, messages)
+            if content:
+                yield content
+                return
+            last_error = RuntimeError(f"非流式接口返回成功但没有输出内容；URL={url}")
+        except Exception as exc:
+            last_error = exc
+            logger.warning(
+                "OpenAI compatible non-stream fallback failed url=%s model=%s error=%s",
+                url,
+                model,
+                exc,
+            )
+
+    tried = ", ".join(urls)
+    raise RuntimeError(f"OpenAI兼容接口请求失败：{last_error}；已尝试路径：{tried}")
+
+
+def _stream_ollama_native(messages, api_key: str, base_url: str, model: str):
+    url = base_url.rstrip("/") + "/api/chat"
+    payload = json.dumps(
+        {
+            "model": model,
+            "messages": messages,
+            "stream": True,
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            for raw_line in resp:
+                line = raw_line.decode("utf-8").strip()
+                if not line:
+                    continue
+                data = json.loads(line)
+                content = data.get("message", {}).get("content", "")
+                if content:
+                    yield content
+                if data.get("done"):
+                    break
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"Ollama 请求失败: HTTP {e.code} {detail}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"Ollama 连接失败: {e.reason}") from e
+
+
 def stream_interpret(multi_result: dict, api_key: str, base_url: str, model: str,
-                     prompt_type: str = "interpret"):
+                     prompt_type: str = "interpret", system_prompt: str = "",
+                     provider_type: str = "openai_compatible"):
     """
     流式调用大模型，逐token返回
 
@@ -206,34 +417,17 @@ def stream_interpret(multi_result: dict, api_key: str, base_url: str, model: str
         base_url: LLM API Base URL
         model: 模型名称
         prompt_type: "interpret" 解卦 / "advice" 破局建议
+        system_prompt: 角色专属 System Prompt；为空时使用默认提示词
+        provider_type: "openai_compatible" 或 "ollama_native"
 
     返回:
         generator，每次 yield 一个 token 字符串
     """
-    from openai import OpenAI
-
-    client = OpenAI(api_key=api_key, base_url=base_url)
-
-    if prompt_type == "advice":
-        prompt = generate_advice_prompt(multi_result)
-        system_msg = "你是一位实战派术数顾问，擅长从传统术数中提炼出可操作的行动方案，帮助求测者趋吉避凶、破局开运。"
+    messages = _build_llm_messages(multi_result, prompt_type, system_prompt)
+    if provider_type == "ollama_native":
+        yield from _stream_ollama_native(messages, api_key, base_url, model)
     else:
-        prompt = generate_prompt(multi_result)
-        system_msg = "你是一位严谨、客观的传统术数综合研判AI，精通八字、奇门遁甲、六爻、梅花易数。"
-
-    stream = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": system_msg},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.7,
-        stream=True,
-    )
-
-    for chunk in stream:
-        if chunk.choices and chunk.choices[0].delta.content:
-            yield chunk.choices[0].delta.content
+        yield from _stream_openai_compatible(messages, api_key, base_url, model)
 
 
 # ==================== 使用示例 ====================

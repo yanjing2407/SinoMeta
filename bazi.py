@@ -8,7 +8,7 @@
   4. 查神煞（天乙贵人、驿马、桃花、旬空等）
 """
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from calendar_utils import (
     TIAN_GAN, DI_ZHI, LIU_SHI_JIA_ZI, TIAN_GAN_WX, DI_ZHI_WX,
     TIAN_GAN_YY, DI_ZHI_CANG, CANG_WEIGHT, WX_SHENG, WX_KE,
@@ -166,6 +166,78 @@ def judge_qiang_ruo(pillars):
     return label, round(ratio, 2), desc
 
 
+def _is_male(gender):
+    return str(gender or '').strip() not in {'女', 'female', 'Female', 'F', 'f'}
+
+
+def _solar_to_datetime(solar):
+    return datetime(
+        solar.getYear(),
+        solar.getMonth(),
+        solar.getDay(),
+        solar.getHour(),
+        solar.getMinute(),
+        solar.getSecond(),
+    )
+
+
+def _format_start_age(months):
+    years = months // 12
+    remain_months = months % 12
+    if years and remain_months:
+        return f"{years}岁{remain_months}个月"
+    if years:
+        return f"{years}岁"
+    return f"{remain_months}个月"
+
+
+def _calc_start_months(birth_dt, jie_dt):
+    diff_minutes = abs((jie_dt - birth_dt).total_seconds()) / 60
+    days = diff_minutes / 1440
+    months = max(1, int(round(days * 4)))
+    return months
+
+
+def calc_dayun(pillars, gender, lunar, birth_dt, count=10):
+    """按年干阴阳和性别排大运：阳男阴女顺，阴男阳女逆。"""
+    year_gan = pillars['年柱'][0]
+    month_gz = pillars['月柱']
+    year_is_yang = TIAN_GAN_YY[year_gan] == '阳'
+    forward = year_is_yang == _is_male(gender)
+
+    target_jie = lunar.getNextJie() if forward else lunar.getPrevJie()
+    target_dt = _solar_to_datetime(target_jie.getSolar())
+    start_months = _calc_start_months(birth_dt, target_dt)
+
+    month_idx = LIU_SHI_JIA_ZI.index(month_gz)
+    luck = []
+    for i in range(1, count + 1):
+        idx = (month_idx + i) % 60 if forward else (month_idx - i) % 60
+        start_age_months = start_months + (i - 1) * 120
+        end_age_months = start_age_months + 119
+        luck.append({
+            '序号': i,
+            '干支': LIU_SHI_JIA_ZI[idx],
+            '年龄': f"{start_age_months // 12}-{end_age_months // 12}岁",
+            '起始年龄月数': start_age_months,
+            '结束年龄月数': end_age_months,
+        })
+
+    direction = '顺行' if forward else '逆行'
+    basis = f"{'阳' if year_is_yang else '阴'}年{gender}命{direction}，以{'下一个' if forward else '上一个'}节气{target_jie.getName()}起算"
+    return {
+        '顺逆': direction,
+        '依据': basis,
+        '起运': {
+            '年龄': _format_start_age(start_months),
+            '月数': start_months,
+            '参照节气': target_jie.getName(),
+            '参照时间': target_dt.strftime('%Y-%m-%d %H:%M:%S'),
+        },
+        '运程': luck,
+    }
+
+
 # ==================== 主函数 ====================
 
 def pa_pan(year, month, day, hour, minute=0, longitude=120.0, gender='男'):
@@ -197,6 +269,7 @@ def pa_pan(year, month, day, hour, minute=0, longitude=120.0, gender='男'):
     lunar = solar.getLunar()
     ec = lunar.getEightChar()
     ec.setSect(2)
+    birth_dt = datetime(act_y, act_m, act_d, true_h, true_m, 0)
 
     nz = ec.getYear()
     yz = ec.getMonth()
@@ -264,6 +337,7 @@ def pa_pan(year, month, day, hour, minute=0, longitude=120.0, gender='男'):
     # 9. 生肖
     sx = {'子':'鼠','丑':'牛','寅':'虎','卯':'兔','辰':'龙','巳':'蛇',
           '午':'马','未':'羊','申':'猴','酉':'鸡','戌':'狗','亥':'猪'}
+    dayun = calc_dayun(pillars, gender, lunar, birth_dt)
 
     return {
         '公历': f'{year}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}',
@@ -280,6 +354,7 @@ def pa_pan(year, month, day, hour, minute=0, longitude=120.0, gender='男'):
         '十二长生': chang_sheng,
         '神煞': shen_sha,
         '生肖': sx.get(nz[1], ''),
+        '大运': dayun,
     }
 
 

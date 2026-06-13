@@ -4,6 +4,31 @@ import sys
 sys.path.insert(0, '.')
 
 
+def test_openai_base_url_normalization():
+    from integrate import _openai_chat_url_candidates, normalize_openai_base_url
+    from llm_store import _normalize_openai_base_url
+
+    assert normalize_openai_base_url('https://xxapi.com.cn/') == 'https://xxapi.com.cn'
+    assert normalize_openai_base_url('https://xxapi.com.cn/v1') == 'https://xxapi.com.cn/v1'
+    assert normalize_openai_base_url(
+        'https://xxapi.com.cn/v1/chat/completions'
+    ) == 'https://xxapi.com.cn/v1'
+    assert normalize_openai_base_url(
+        'https://xxapi.com.cn/', append_v1=True
+    ) == 'https://xxapi.com.cn/v1'
+    assert _normalize_openai_base_url(
+        'https://xxapi.com.cn/v1/chat/completions'
+    ) == 'https://xxapi.com.cn/v1'
+    assert _openai_chat_url_candidates('https://xxapi.com.cn/v1') == [
+        'https://xxapi.com.cn/v1/chat/completions'
+    ]
+    assert _openai_chat_url_candidates('https://xxapi.com.cn/') == [
+        'https://xxapi.com.cn/chat/completions',
+        'https://xxapi.com.cn/v1/chat/completions',
+    ]
+    print("PASS: test_openai_base_url_normalization")
+
+
 def test_jie_qi_month():
     from calendar_utils import get_jie_qi_month
 
@@ -163,6 +188,20 @@ def test_bazi_lunar_python():
     print("PASS: test_bazi_lunar_python")
 
 
+def test_bazi_dayun_uses_gender():
+    from bazi import pa_pan
+
+    male = pa_pan(1990, 5, 1, 8, 0, longitude=116.4, gender='男')
+    female = pa_pan(1990, 5, 1, 8, 0, longitude=116.4, gender='女')
+
+    assert male['大运']['顺逆'] == '顺行'
+    assert female['大运']['顺逆'] == '逆行'
+    assert male['大运']['运程'][0]['干支'] == '辛巳'
+    assert female['大运']['运程'][0]['干支'] == '己卯'
+    assert male['大运']['起运']['月数'] > 0
+    print("PASS: test_bazi_dayun_uses_gender")
+
+
 def test_qimen_zhishi_no_zhong():
     """验证值使永不为'中'"""
     from qimen import arrange_di_pan, get_zhi_fu_zhi_shi
@@ -258,6 +297,7 @@ def test_qimen_dongzhi_yangdun():
 
 
 if __name__ == '__main__':
+    test_openai_base_url_normalization()
     test_jie_qi_month()
     test_true_solar_time()
     test_trigram_mapping()
@@ -269,6 +309,7 @@ if __name__ == '__main__':
     test_changsheng_yin_stem()
     test_precise_jieqi_month()
     test_bazi_lunar_python()
+    test_bazi_dayun_uses_gender()
     test_qimen_zhishi_no_zhong()
     test_qimen_day_offset()
     test_liuyao_day_offset()

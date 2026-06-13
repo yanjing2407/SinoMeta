@@ -38,6 +38,17 @@ a{color:var(--gold)}
 .method-btn:hover{border-color:var(--gold-dim);color:var(--text)}
 .method-btn.active{border-color:var(--gold);color:var(--gold);background:rgba(226,185,105,.1)}
 
+.role-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}
+.role-card{border:1px solid var(--border);border-radius:6px;background:var(--bg2);padding:10px;text-align:left;cursor:pointer;color:var(--text);font-family:inherit;transition:all .2s;min-height:112px}
+.role-card:hover{border-color:var(--gold-dim)}
+.role-card.active{border-color:var(--gold);box-shadow:0 0 0 1px rgba(226,185,105,.25)}
+.role-card.disabled{opacity:.55}
+.role-card .name{color:var(--gold);font-weight:700;font-size:1rem}
+.role-card .avatar{color:var(--text-dim);font-size:.78rem;margin-top:2px}
+.role-card .specialty{font-size:.82rem;margin-top:8px}
+.role-card .meta{color:var(--text-dim);font-size:.74rem;margin-top:8px}
+.role-card .warn{color:#e88}
+
 .btn-row{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
 .btn{padding:9px 24px;border:1px solid var(--gold-dim);border-radius:4px;background:transparent;color:var(--gold);font-family:inherit;font-size:.95rem;cursor:pointer;transition:all .2s}
 .btn:hover{background:var(--gold);color:var(--bg)}
@@ -97,6 +108,7 @@ a{color:var(--gold)}
 .ai-result th,.ai-result td{border:1px solid var(--border);padding:5px 8px;text-align:left}
 .ai-result th{background:var(--bg2);color:var(--gold)}
 .ai-result hr{border:none;border-top:1px solid var(--border);margin:10px 0}
+.ai-result .error-box{border:1px solid #8f3434;background:rgba(192,57,43,.12);color:#ffd5d5;border-radius:6px;padding:10px 12px}
 .ai-result .cursor{display:inline-block;width:2px;height:1em;background:var(--gold);animation:blink .8s step-end infinite;vertical-align:text-bottom}
 @keyframes blink{50%{opacity:0}}
 
@@ -126,19 +138,13 @@ a{color:var(--gold)}
 
 <div class="container">
 
-  <!-- LLM Config -->
+  <!-- Role Select -->
   <div class="card">
-    <div class="card-title" onclick="toggleCard(this)"><span>大模型配置</span><span class="arrow">▼</span></div>
-    <div class="card-body hidden" id="configBody">
-      <div class="form-row">
-        <div class="form-group" style="flex:2"><label>API Key</label><input type="password" id="llm_api_key" placeholder="sk-..."></div>
+    <div class="card-title" style="cursor:default"><span>选择大师</span></div>
+    <div class="card-body">
+      <div class="role-grid" id="roleGrid">
+        <div style="color:var(--text-dim);font-size:.85rem">正在加载角色...</div>
       </div>
-      <div class="form-row">
-        <div class="form-group" style="flex:2"><label>Base URL</label><input type="text" id="llm_base_url" value="https://api.deepseek.com"></div>
-        <div class="form-group" style="flex:1"><label>模型</label><input type="text" id="llm_model" value="deepseek-chat"></div>
-      </div>
-      <button class="btn" onclick="saveLLMConfig()" style="margin-top:4px">保存配置</button>
-      <p style="font-size:.75rem;color:var(--text-dim);margin-top:6px">配置保存在浏览器本地，不会上传服务器。</p>
     </div>
   </div>
 
@@ -162,8 +168,8 @@ a{color:var(--gold)}
       </div>
 
       <div class="form-row">
-        <div class="form-group"><label>经度</label><input type="number" id="q_lng" step="0.1" value="116.4"></div>
-        <div class="form-group"><label>纬度</label><input type="number" id="q_lat" step="0.1" value="39.9"></div>
+        <div class="form-group"><label>经度</label><input type="number" id="q_lng" step="0.000001" placeholder="自动定位或手动填写"></div>
+        <div class="form-group"><label>纬度</label><input type="number" id="q_lat" step="0.000001" placeholder="自动定位或手动填写"></div>
         <div class="form-group"><label>性别</label>
           <select id="q_gender"><option value="男">男</option><option value="女">女</option></select>
         </div>
@@ -245,18 +251,47 @@ function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show')
 function toggleCard(el){el.classList.toggle('collapsed');const b=el.nextElementSibling;b.classList.toggle('hidden')}
 function toggleMethod(el){el.classList.toggle('active')}
 function getMethods(){return[...document.querySelectorAll('#methodGroup .method-btn.active')].map(e=>e.dataset.val)}
+function escapeHTML(text){return String(text??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}
 
-// ===== LLM Config =====
-function loadLLMConfig(){
-  $('llm_base_url').value=localStorage.getItem('llm_base_url')||'https://api.deepseek.com';
-  $('llm_model').value=localStorage.getItem('llm_model')||'deepseek-chat';
-  $('llm_api_key').value=localStorage.getItem('llm_api_key')||'';
+// ===== Roles =====
+let roles=[];
+let selectedRoleId=null;
+
+async function loadRoles(){
+  try{
+    const res=await fetch('/api/roles');
+    if(!res.ok) throw new Error(await res.text());
+    const data=await res.json();
+    roles=data.roles||[];
+    const defaultRole=roles.find(r=>r.is_default)||roles[0];
+    selectedRoleId=defaultRole?.id||null;
+    renderRoles();
+  }catch(e){
+    $('roleGrid').innerHTML='<div style="color:#e88;font-size:.85rem">角色加载失败，请稍后重试</div>';
+  }
 }
-function saveLLMConfig(){
-  localStorage.setItem('llm_base_url',$('llm_base_url').value);
-  localStorage.setItem('llm_model',$('llm_model').value);
-  localStorage.setItem('llm_api_key',$('llm_api_key').value);
-  toast('配置已保存');
+function selectRole(id){
+  selectedRoleId=id;
+  renderRoles();
+}
+function renderRoles(){
+  if(!roles.length){
+    $('roleGrid').innerHTML='<div style="color:var(--text-dim);font-size:.85rem">暂无可用角色，请先到后台配置</div>';
+    return;
+  }
+  $('roleGrid').innerHTML=roles.map(r=>{
+    const cls=['role-card'];
+    if(r.id===selectedRoleId) cls.push('active');
+    if(!r.is_configured) cls.push('disabled');
+    const configured=r.is_configured?'已配置':'待配置';
+    const warn=r.is_configured?'':' warn';
+    return `<button type="button" class="${cls.join(' ')}" onclick="selectRole(${r.id})">
+      <div class="name">${escapeHTML(r.name)}</div>
+      <div class="avatar">${escapeHTML(r.avatar_style||'角色')}</div>
+      <div class="specialty">${escapeHTML(r.specialty||'综合解读')}</div>
+      <div class="meta${warn}">${escapeHTML(r.provider_name||'')} · ${escapeHTML(r.model||'')} · ${configured}</div>
+    </button>`;
+  }).join('');
 }
 
 // ===== DateTime =====
@@ -287,6 +322,39 @@ function getBirthTime(){
   return null;
 }
 
+function setLocationInputs(lng,lat){
+  if(Number.isFinite(lng)) $('q_lng').value=lng.toFixed(6);
+  if(Number.isFinite(lat)) $('q_lat').value=lat.toFixed(6);
+}
+function initGeoLocation(){
+  if(!navigator.geolocation){
+    toast('当前浏览器不支持自动定位，可手动填写经纬度');
+    return;
+  }
+  const host=location.hostname;
+  const isLocalhost=host==='localhost'||host==='127.0.0.1'||host==='::1';
+  if(!window.isSecureContext&&!isLocalhost){
+    toast('手机浏览器定位需要 HTTPS；当前页面可手动填写经纬度');
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(
+    pos=>{
+      const coords=pos.coords||{};
+      setLocationInputs(coords.longitude,coords.latitude);
+      toast('已自动获取当前位置');
+    },
+    err=>{
+      const tips={
+        1:'定位权限被拒绝，可手动填写经纬度',
+        2:'暂时无法获取定位，可手动填写经纬度',
+        3:'定位超时，可手动填写经纬度',
+      };
+      toast(tips[err.code]||'自动定位失败，可手动填写经纬度');
+    },
+    {enableHighAccuracy:true,timeout:10000,maximumAge:300000}
+  );
+}
+
 // ===== Build Request =====
 function buildRequest(){
   const event=$('event').value.trim();
@@ -294,12 +362,19 @@ function buildRequest(){
   const methods=getMethods();
   if(!methods.length){toast('请至少选择一种术数');return null}
   const dt=getDateTime();
+  const longitude=parseFloat($('q_lng').value);
+  const latitude=parseFloat($('q_lat').value);
+  if(!Number.isFinite(longitude)||!Number.isFinite(latitude)){
+    toast('请先允许定位，或手动填写经纬度');
+    return null;
+  }
   const req={
     event,methods,
     year:dt.year,month:dt.month,day:dt.day,hour:dt.hour,minute:dt.minute,
-    longitude:parseFloat($('q_lng').value)||116.4,
-    latitude:parseFloat($('q_lat').value)||39.9,
+    longitude,
+    latitude,
     gender:$('q_gender').value,
+    role_id:selectedRoleId,
   };
   // 出生时间
   const birth=getBirthTime();
@@ -325,17 +400,21 @@ function buildRequest(){
 // ===== API =====
 async function apiDivine(req){
   const res=await fetch('/api/divine',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(req)});
-  if(!res.ok) throw new Error(await res.text());
+  if(!res.ok) throw new Error(await readError(res));
   return await res.json();
+}
+async function readError(res){
+  const text=await res.text();
+  try{return JSON.parse(text).detail||text}catch{return text}
 }
 
 // ===== SSE Stream Helper =====
 async function streamSSE(url, body, el){
   const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  if(!res.ok) throw new Error(await res.text());
+  if(!res.ok) throw new Error(await readError(res));
   const reader=res.body.getReader();
   const decoder=new TextDecoder();
-  let fullText='';let buffer='';
+  let fullText='';let buffer='';let streamError=null;
   while(true){
     const{done,value}=await reader.read();
     if(done)break;
@@ -345,12 +424,19 @@ async function streamSSE(url, body, el){
       if(!line.startsWith('data:'))continue;
       try{
         const obj=JSON.parse(line.slice(5).trim());
+        if(obj.error){
+          streamError=obj.trace_id?`[${obj.trace_id}] ${obj.error}`:obj.error;
+          el.innerHTML=`<div class="error-box"><strong>AI 请求失败</strong><br>${escapeHTML(streamError)}</div>`;
+          toast('AI 请求失败，详情已显示在结果区');
+          continue;
+        }
         if(obj.token){fullText+=obj.token;if(typeof marked!=='undefined'&&typeof DOMPurify!=='undefined'){el.innerHTML=DOMPurify.sanitize(marked.parse(fullText))+'<span class="cursor"></span>'}else{el.innerHTML=fullText.replace(/\n/g,'<br>')+'<span class="cursor"></span>'}}
         else if(obj.error){fullText+='\n\n[错误] '+obj.error;if(typeof marked!=='undefined'&&typeof DOMPurify!=='undefined'){el.innerHTML=DOMPurify.sanitize(marked.parse(fullText))}else{el.innerHTML=fullText.replace(/\n/g,'<br>')}}
       }catch{}
     }
   }
   // 流式结束后统一解析 Markdown
+  if(streamError) throw new Error(streamError);
   if(typeof marked!=='undefined'&&typeof DOMPurify!=='undefined'){
     const rawHtml=marked.parse(fullText);
     el.innerHTML=DOMPurify.sanitize(rawHtml);
@@ -384,6 +470,12 @@ function renderBaZi(data){
   if(ss2['桃花']?.length) ssStr.push('桃花:'+ss2['桃花'].join(','));
   if(ss2['旬空']?.length) ssStr.push('旬空:'+ss2['旬空'].join(','));
   if(ssStr.length) h+=`<div style="margin-top:3px;color:var(--text-dim);font-size:.8rem">${ssStr.join(' · ')}</div>`;
+  const dy=data['大运'];
+  if(dy){
+    h+=`<div style="margin-top:6px;font-size:.82rem;color:var(--text-dim)">大运：${escapeHTML(dy['顺逆']||'')} · 起运 ${escapeHTML(dy['起运']?.['年龄']||'')} · ${escapeHTML(dy['依据']||'')}</div>`;
+    const luck=(dy['运程']||[]).slice(0,5).map(x=>`${escapeHTML(x['年龄']||'')} ${escapeHTML(x['干支']||'')}`).join(' · ');
+    if(luck) h+=`<div style="margin-top:3px;font-size:.82rem;color:var(--gold)">前五步：${luck}</div>`;
+  }
   $('baziResult').innerHTML=h;
 }
 
@@ -457,26 +549,6 @@ function renderResults(data){
 let lastDivineData=null;
 let lastRequest=null;
 
-function ensureAPIKey(){
-  const apiKey=$('llm_api_key').value||localStorage.getItem('llm_api_key')||'';
-  if(!apiKey){
-    const title=document.querySelector('#configBody').previousElementSibling;
-    if(title.nextElementSibling.classList.contains('hidden')) toggleCard(title);
-    toast('请先配置 API Key');
-    return null;
-  }
-  return apiKey;
-}
-
-function addLLMParams(req){
-  return{
-    ...req,
-    api_key:$('llm_api_key').value||localStorage.getItem('llm_api_key')||'',
-    base_url:$('llm_base_url').value||localStorage.getItem('llm_base_url')||'https://api.deepseek.com',
-    model:$('llm_model').value||localStorage.getItem('llm_model')||'deepseek-chat',
-  };
-}
-
 async function doDivine(){
   const req=buildRequest();if(!req)return;
   lastRequest=req;
@@ -491,7 +563,7 @@ async function doDivine(){
 }
 
 async function doInterpret(){
-  const apiKey=ensureAPIKey();if(!apiKey)return;
+  if(!selectedRoleId){toast('请先选择大师');return}
   const req=buildRequest();if(!req)return;
   lastRequest=req;
 
@@ -506,14 +578,14 @@ async function doInterpret(){
     const aiEl=$('aiResult');aiEl.innerHTML='<span class="cursor"></span>';
     $('aiCard').scrollIntoView({behavior:'smooth'});
 
-    await streamSSE('/api/interpret', addLLMParams(req), aiEl);
+    await streamSSE('/api/interpret', req, aiEl);
   }catch(e){toast('操作失败: '+e.message)}
   finally{btn.disabled=false;btn.textContent='起盘 + 解卦'}
 }
 
 async function doAdvice(){
   if(!lastDivineData){toast('请先起卦');return}
-  const apiKey=ensureAPIKey();if(!apiKey)return;
+  if(!selectedRoleId){toast('请先选择大师');return}
 
   const btn=$('btnAdvice');btn.disabled=true;btn.textContent='分析中...';
   try{
@@ -521,15 +593,16 @@ async function doAdvice(){
     const advEl=$('adviceResult');advEl.innerHTML='<span class="cursor"></span>';
     $('adviceCard').scrollIntoView({behavior:'smooth'});
 
-    await streamSSE('/api/advice', addLLMParams(lastRequest), advEl);
+    await streamSSE('/api/advice', lastRequest, advEl);
   }catch(e){toast('操作失败: '+e.message)}
   finally{btn.disabled=false;btn.textContent='破局建议'}
 }
 
 // ===== Init =====
 window.addEventListener('DOMContentLoaded',()=>{
-  loadLLMConfig();
+  loadRoles();
   refreshTime();
+  initGeoLocation();
 });
 
 // 排盘结果出来后，动态插入破局建议按钮
