@@ -18,9 +18,59 @@ from bazi import pa_pan as bazi_pa_pan
 from qimen import pa_pan as qimen_pa_pan
 from liuyao import pa_pan_by_time as liuyao_pa_pan, pa_pan_by_numbers as liuyao_pa_pan_num
 from meihua import pa_pan as meihua_pa_pan
+from ziwei import pa_pan as ziwei_pa_pan
 
 
 logger = logging.getLogger("sinometa")
+
+
+# ==================== 术数注册表 ====================
+# 新增术数只需：1.写 xxx.py  2.加一个 _run_xxx handler  3.在 METHOD_REGISTRY 注册
+
+def _run_bazi(ctx):
+    return bazi_pa_pan(ctx['year'], ctx['month'], ctx['day'], ctx['hour'],
+                       ctx['minute'], ctx['longitude'], ctx['gender'])
+
+def _run_qimen(ctx):
+    return qimen_pa_pan(ctx['year'], ctx['month'], ctx['day'], ctx['hour'],
+                        ctx['minute'], ctx['longitude'])
+
+def _run_liuyao(ctx):
+    nums = ctx.get('liuyao_nums')
+    if nums:
+        return liuyao_pa_pan_num(nums[0], nums[1],
+            year=ctx['year'], month=ctx['month'], day=ctx['day'],
+            hour=ctx['hour'], minute=ctx['minute'], longitude=ctx['longitude'])
+    return liuyao_pa_pan(ctx['year'], ctx['month'], ctx['day'], ctx['hour'],
+                         ctx['minute'], ctx['longitude'])
+
+def _run_meihua(ctx):
+    nums = ctx.get('meihua_nums')
+    azimuth = ctx.get('azimuth')
+    if nums:
+        method = 'number'
+    elif azimuth is not None:
+        method = 'fangwei'
+    else:
+        method = 'time'
+    return meihua_pa_pan(ctx['year'], ctx['month'], ctx['day'], ctx['hour'],
+                         ctx['minute'], ctx['longitude'], method=method,
+                         num1=nums[0] if nums else None,
+                         num2=nums[1] if nums else None,
+                         azimuth=azimuth)
+
+def _run_ziwei(ctx):
+    return ziwei_pa_pan(ctx['year'], ctx['month'], ctx['day'], ctx['hour'],
+                        ctx['minute'], ctx['longitude'], ctx['gender'])
+
+# 注册表: 前端method名 → (结果key名, handler)
+METHOD_REGISTRY = {
+    '八字':  ('八字',     _run_bazi),
+    '奇门':  ('奇门遁甲', _run_qimen),
+    '六爻':  ('六爻',     _run_liuyao),
+    '梅花':  ('梅花易数', _run_meihua),
+    '紫微':  ('紫微斗数', _run_ziwei),
+}
 
 
 def multi_divination(
@@ -49,47 +99,26 @@ def multi_divination(
     if methods is None:
         methods = ['八字', '奇门', '梅花']
 
+    ctx = {
+        'year': year, 'month': month, 'day': day,
+        'hour': hour, 'minute': minute,
+        'longitude': longitude, 'latitude': latitude,
+        'gender': gender,
+        'liuyao_nums': liuyao_nums,
+        'meihua_nums': meihua_nums,
+        'azimuth': azimuth,
+    }
+
     results = {}
-
-    if '八字' in methods:
+    for m in methods:
+        entry = METHOD_REGISTRY.get(m)
+        if not entry:
+            continue
+        result_key, handler = entry
         try:
-            results['八字'] = bazi_pa_pan(year, month, day, hour, minute, longitude, gender)
+            results[result_key] = handler(ctx)
         except Exception as e:
-            results['八字'] = {'错误': str(e)}
-
-    if '奇门' in methods:
-        try:
-            results['奇门遁甲'] = qimen_pa_pan(year, month, day, hour, minute, longitude)
-        except Exception as e:
-            results['奇门遁甲'] = {'错误': str(e)}
-
-    if '六爻' in methods:
-        try:
-            if liuyao_nums:
-                results['六爻'] = liuyao_pa_pan_num(
-                    liuyao_nums[0], liuyao_nums[1],
-                    year=year, month=month, day=day, hour=hour, minute=minute, longitude=longitude)
-            else:
-                results['六爻'] = liuyao_pa_pan(year, month, day, hour, minute, longitude)
-        except Exception as e:
-            results['六爻'] = {'错误': str(e)}
-
-    if '梅花' in methods:
-        try:
-            if meihua_nums:
-                mh_method = 'number'
-            elif azimuth is not None:
-                mh_method = 'fangwei'
-            else:
-                mh_method = 'time'
-            results['梅花易数'] = meihua_pa_pan(
-                year, month, day, hour, minute, longitude,
-                method=mh_method,
-                num1=meihua_nums[0] if meihua_nums else None,
-                num2=meihua_nums[1] if meihua_nums else None,
-                azimuth=azimuth)
-        except Exception as e:
-            results['梅花易数'] = {'错误': str(e)}
+            results[result_key] = {'错误': str(e)}
 
     # 时空坐标信息
     spatiotemporal = {
@@ -132,17 +161,18 @@ def generate_prompt(multi_result: dict) -> str:
     # 将结果序列化为易读文本
     result_text = json.dumps(results, ensure_ascii=False, indent=2, default=str)
 
-    prompt = f"""你是一位精通中国传统术数（八字、奇门遁甲、六爻、梅花易数）的大师。
+    prompt = f"""你是一位精通中国传统术数（八字、紫微斗数、奇门遁甲、六爻、梅花易数）的大师。
 请根据以下多维度排盘数据，综合分析事件的发展趋势。
 
 # 分析规则：
 1. 【八字视角】看命局基础与大运流年能量：判断求测人自身能量是否足以支撑此事。看日主强弱、用神方向。
-2. 【奇门视角】看具体事情的时空态势：看用神落宫的星门神仪组合，判断天时地利人和。
-3. 【六爻视角】看事情细节与动变：看用神旺衰、动爻变化、日月建对用神的影响。
-4. 【梅花视角】看体用生克：看体卦用卦的五行关系，快速判断吉凶大势。
-5. 【综合判断】多术数交叉验证：
+2. 【紫微视角】看命盘格局与大限走势：看命宫主星组合、四化飞布，判断当前运势能量与适宜方向。
+3. 【奇门视角】看具体事情的时空态势：看用神落宫的星门神仪组合，判断天时地利人和。
+4. 【六爻视角】看事情细节与动变：看用神旺衰、动爻变化、日月建对用神的影响。
+5. 【梅花视角】看体用生克：看体卦用卦的五行关系，快速判断吉凶大势。
+6. 【综合判断】多术数交叉验证：
    - 各术数结论一致时，置信度最高
-   - 八字看长期底色，奇门看时空机遇，六爻看事件细节，梅花看大势方向
+   - 八字看长期底色，紫微看格局层次，奇门看时空机遇，六爻看事件细节，梅花看大势方向
    - 若结论冲突，说明不同维度的信息差异，给出概率性判断
 
 # 事件：
@@ -158,11 +188,12 @@ def generate_prompt(multi_result: dict) -> str:
 
 请按以下结构输出：
 1. 【八字视角】：自身能量与时机分析（200字）
-2. 【奇门视角】：事情环境、阻力与助力分析（200字）
-3. 【六爻视角】：事情细节与动变分析（200字）
-4. 【梅花视角】：体用生克大势判断（100字）
-5. 【综合断语】：多术数交叉验证后的最终结论（200字）
-6. 【行动建议】：基于以上分析的具体建议（100字）
+2. 【紫微视角】：命盘格局与运势分析（200字）
+3. 【奇门视角】：事情环境、阻力与助力分析（200字）
+4. 【六爻视角】：事情细节与动变分析（200字）
+5. 【梅花视角】：体用生克大势判断（100字）
+6. 【综合断语】：多术数交叉验证后的最终结论（200字）
+7. 【行动建议】：基于以上分析的具体建议（100字）
 """
     return prompt
 
@@ -176,7 +207,7 @@ def generate_advice_prompt(multi_result: dict) -> str:
     results = multi_result['术数结果']
     result_text = json.dumps(results, ensure_ascii=False, indent=2, default=str)
 
-    prompt = f"""你是一位精通中国传统术数（八字、奇门遁甲、六爻、梅花易数）的实战派顾问。
+    prompt = f"""你是一位精通中国传统术数（八字、紫微斗数、奇门遁甲、六爻、梅花易数）的实战派顾问。
 求测者已经看到了排盘结果和初步解读，现在需要你给出**破局建议**——即在当前局面下，求测者可以采取哪些具体行动来改善局势、趋吉避凶。
 
 # 事件：
@@ -208,7 +239,7 @@ def _build_llm_messages(multi_result: dict, prompt_type: str, system_prompt: str
         system_msg = system_prompt or "你是一位实战派术数顾问，擅长从传统术数中提炼出可操作的行动方案，帮助求测者趋吉避凶、破局开运。"
     else:
         prompt = generate_prompt(multi_result)
-        system_msg = system_prompt or "你是一位严谨、客观的传统术数综合研判AI，精通八字、奇门遁甲、六爻、梅花易数。"
+        system_msg = system_prompt or "你是一位严谨、客观的传统术数综合研判AI，精通八字、紫微斗数、奇门遁甲、六爻、梅花易数。"
     return [
         {"role": "system", "content": system_msg},
         {"role": "user", "content": prompt},

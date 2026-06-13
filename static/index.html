@@ -60,14 +60,12 @@ a{color:var(--gold)}
 
 .section-label{font-size:.85rem;color:var(--text-dim);border-left:3px solid var(--gold-dim);padding-left:8px;margin:12px 0 8px}
 
-/* Bazi */
 .pillars{display:flex;gap:10px;justify-content:center;margin:8px 0}
 .pillar{text-align:center;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:8px 14px;min-width:70px}
 .pillar .pos{font-size:.75rem;color:var(--text-dim)}
 .pillar .gz{font-size:1.3rem;color:var(--gold);font-weight:700;margin:2px 0}
 .pillar .ss{font-size:.75rem;color:var(--text-dim)}
 
-/* Qimen */
 .qimen-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;max-width:540px;margin:8px auto}
 .qimen-cell{background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:6px;text-align:center;font-size:.78rem;line-height:1.5}
 .qimen-cell .gua{font-weight:700;color:var(--gold);font-size:.85rem}
@@ -76,23 +74,19 @@ a{color:var(--gold)}
 .qimen-cell .xing{color:#e8a87c}.qimen-cell .men{color:#d4a5e5}.qimen-cell .shen{color:#f7dc6f}
 .qimen-cell .ji{color:var(--gold);font-size:.72rem}.qimen-cell .xiong{color:var(--red);font-size:.72rem}
 
-/* Liuyao */
 .liuyao-table{width:100%;border-collapse:collapse;margin:8px 0;font-size:.85rem}
 .liuyao-table th,.liuyao-table td{border:1px solid var(--border);padding:5px 8px;text-align:center}
 .liuyao-table th{background:var(--bg2);color:var(--gold)}
 .dong{color:var(--red);font-weight:700}
 .shi-mark{color:var(--gold)}.ying-mark{color:#7ec8e3}
 
-/* Meihua */
 .meihua-row{display:flex;gap:10px;margin:8px 0;flex-wrap:wrap}
 .meihua-gua{flex:1;min-width:120px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px;text-align:center}
 .meihua-gua .label{font-size:.8rem;color:var(--text-dim)}
 .meihua-gua .name{font-size:1.1rem;color:var(--gold);font-weight:700;margin:2px 0}
 .meihua-gua .detail{font-size:.78rem;color:var(--text-dim)}
 
-/* AI */
 .ai-result{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:16px;min-height:60px;font-size:.92rem;line-height:1.8}
-/* Markdown 渲染样式 */
 .ai-result h1,.ai-result h2,.ai-result h3{margin:12px 0 6px;color:var(--gold)}
 .ai-result h1{font-size:1.3rem;border-bottom:1px solid var(--border);padding-bottom:6px}
 .ai-result h2{font-size:1.15rem}
@@ -138,16 +132,6 @@ a{color:var(--gold)}
 
 <div class="container">
 
-  <!-- Role Select -->
-  <div class="card">
-    <div class="card-title" style="cursor:default"><span>选择大师</span></div>
-    <div class="card-body">
-      <div class="role-grid" id="roleGrid">
-        <div style="color:var(--text-dim);font-size:.85rem">正在加载角色...</div>
-      </div>
-    </div>
-  </div>
-
   <!-- Divination Form -->
   <div class="card">
     <div class="card-title" style="cursor:default"><span>起卦</span></div>
@@ -159,7 +143,6 @@ a{color:var(--gold)}
         </div>
       </div>
 
-      <!-- 起卦时间 -->
       <div class="section-label">起卦时间（自动取当前时刻，可手动修改）</div>
       <div class="form-row">
         <div class="form-group"><label>日期</label><input type="date" id="q_date"></div>
@@ -175,8 +158,7 @@ a{color:var(--gold)}
         </div>
       </div>
 
-      <!-- 出生时间（八字专用） -->
-      <div class="section-label">出生时间（八字排盘专用，不填则用起卦时间）</div>
+      <div class="section-label">出生时间（八字/紫微排盘专用，不填则用起卦时间）</div>
       <div class="form-row">
         <div class="form-group"><label>出生年</label><input type="number" id="b_year" placeholder="如1990"></div>
         <div class="form-group"><label>月</label><input type="number" id="b_month" min="1" max="12" placeholder="1-12"></div>
@@ -185,18 +167,17 @@ a{color:var(--gold)}
         <div class="form-group"><label>分</label><input type="number" id="b_minute" min="0" max="59" placeholder="0-59"></div>
       </div>
 
-      <!-- 术数方法 -->
       <div class="form-group">
         <label>选择术数</label>
         <div class="method-group" id="methodGroup">
           <button class="method-btn active" data-val="八字" onclick="toggleMethod(this)">八字</button>
+          <button class="method-btn active" data-val="紫微" onclick="toggleMethod(this)">紫微斗数</button>
           <button class="method-btn active" data-val="奇门" onclick="toggleMethod(this)">奇门遁甲</button>
           <button class="method-btn" data-val="六爻" onclick="toggleMethod(this)">六爻</button>
           <button class="method-btn active" data-val="梅花" onclick="toggleMethod(this)">梅花易数</button>
         </div>
       </div>
 
-      <!-- 起卦参数（可选） -->
       <div class="section-label">起卦参数（可选，不填则用时间自动起卦）</div>
       <div class="form-row">
         <div class="form-group"><label>六爻数字1</label><input type="number" id="liuyao_n1" placeholder="如6"></div>
@@ -208,7 +189,6 @@ a{color:var(--gold)}
 
       <div class="btn-row">
         <button class="btn btn-primary" id="btnDivine" onclick="doDivine()">起卦</button>
-        <button class="btn" id="btnInterpret" onclick="doInterpret()">起盘 + 解卦</button>
       </div>
     </div>
   </div>
@@ -218,6 +198,10 @@ a{color:var(--gold)}
     <div class="card" id="baziCard" style="display:none">
       <div class="card-title" onclick="toggleCard(this)"><span>四柱八字</span><span class="arrow">▼</span></div>
       <div class="card-body" id="baziResult"></div>
+    </div>
+    <div class="card" id="ziweiCard" style="display:none">
+      <div class="card-title" onclick="toggleCard(this)"><span>紫微斗数</span><span class="arrow">▼</span></div>
+      <div class="card-body" id="ziweiResult"></div>
     </div>
     <div class="card" id="qimenCard" style="display:none">
       <div class="card-title" onclick="toggleCard(this)"><span>奇门遁甲</span><span class="arrow">▼</span></div>
@@ -231,15 +215,29 @@ a{color:var(--gold)}
       <div class="card-title" onclick="toggleCard(this)"><span>梅花易数</span><span class="arrow">▼</span></div>
       <div class="card-body" id="meihuaResult"></div>
     </div>
-    <div class="card" id="aiCard" style="display:none">
-      <div class="card-title" onclick="toggleCard(this)"><span>AI 解卦</span><span class="arrow">▼</span></div>
-      <div class="card-body"><div class="ai-result" id="aiResult"></div></div>
-    </div>
-    <div class="card" id="adviceCard" style="display:none">
-      <div class="card-title" onclick="toggleCard(this)"><span>破局建议</span><span class="arrow">▼</span></div>
-      <div class="card-body"><div class="ai-result" id="adviceResult"></div></div>
+
+    <div style="text-align:center;margin:16px 0">
+      <button class="btn" onclick="exportText()">导出卦象</button>
     </div>
   </div>
+
+  <!-- Interpret Area -->
+  <div id="interpretArea" style="display:none">
+    <div class="card">
+      <div class="card-title" style="cursor:default"><span>选择大师解卦</span></div>
+      <div class="card-body">
+        <div class="role-grid" id="roleGrid">
+          <div style="color:var(--text-dim);font-size:.85rem">正在加载角色...</div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" id="btnInterpret2" onclick="doInterpret2()">解卦</button>
+          <button class="btn btn-red" id="btnAdvice2" onclick="doAdvice2()">破局建议</button>
+        </div>
+      </div>
+    </div>
+    <div id="interpretHistory"></div>
+  </div>
+
 </div>
 
 <div class="toast" id="toast"></div>
@@ -293,6 +291,10 @@ function renderRoles(){
     </button>`;
   }).join('');
 }
+function getSelectedRoleName(){
+  const r=roles.find(x=>x.id===selectedRoleId);
+  return r?r.name:'未知';
+}
 
 // ===== DateTime =====
 function refreshTime(){
@@ -327,30 +329,13 @@ function setLocationInputs(lng,lat){
   if(Number.isFinite(lat)) $('q_lat').value=lat.toFixed(6);
 }
 function initGeoLocation(){
-  if(!navigator.geolocation){
-    toast('当前浏览器不支持自动定位，可手动填写经纬度');
-    return;
-  }
+  if(!navigator.geolocation){toast('当前浏览器不支持自动定位，可手动填写经纬度');return}
   const host=location.hostname;
   const isLocalhost=host==='localhost'||host==='127.0.0.1'||host==='::1';
-  if(!window.isSecureContext&&!isLocalhost){
-    toast('手机浏览器定位需要 HTTPS；当前页面可手动填写经纬度');
-    return;
-  }
+  if(!window.isSecureContext&&!isLocalhost){toast('手机浏览器定位需要 HTTPS；当前页面可手动填写经纬度');return}
   navigator.geolocation.getCurrentPosition(
-    pos=>{
-      const coords=pos.coords||{};
-      setLocationInputs(coords.longitude,coords.latitude);
-      toast('已自动获取当前位置');
-    },
-    err=>{
-      const tips={
-        1:'定位权限被拒绝，可手动填写经纬度',
-        2:'暂时无法获取定位，可手动填写经纬度',
-        3:'定位超时，可手动填写经纬度',
-      };
-      toast(tips[err.code]||'自动定位失败，可手动填写经纬度');
-    },
+    pos=>{setLocationInputs(pos.coords.longitude,pos.coords.latitude);toast('已自动获取当前位置')},
+    err=>{const tips={1:'定位权限被拒绝，可手动填写经纬度',2:'暂时无法获取定位，可手动填写经纬度',3:'定位超时，可手动填写经纬度'};toast(tips[err.code]||'自动定位失败，可手动填写经纬度')},
     {enableHighAccuracy:true,timeout:10000,maximumAge:300000}
   );
 }
@@ -364,33 +349,13 @@ function buildRequest(){
   const dt=getDateTime();
   const longitude=parseFloat($('q_lng').value);
   const latitude=parseFloat($('q_lat').value);
-  if(!Number.isFinite(longitude)||!Number.isFinite(latitude)){
-    toast('请先允许定位，或手动填写经纬度');
-    return null;
-  }
-  const req={
-    event,methods,
-    year:dt.year,month:dt.month,day:dt.day,hour:dt.hour,minute:dt.minute,
-    longitude,
-    latitude,
-    gender:$('q_gender').value,
-    role_id:selectedRoleId,
-  };
-  // 出生时间
+  if(!Number.isFinite(longitude)||!Number.isFinite(latitude)){toast('请先允许定位，或手动填写经纬度');return null}
+  const req={event,methods,year:dt.year,month:dt.month,day:dt.day,hour:dt.hour,minute:dt.minute,longitude,latitude,gender:$('q_gender').value};
   const birth=getBirthTime();
-  if(birth){
-    req.birth_year=birth.year;
-    req.birth_month=birth.month;
-    req.birth_day=birth.day;
-    req.birth_hour=birth.hour;
-    req.birth_minute=birth.minute;
-  }
-  // 起卦参数
-  const ln1=parseInt($('liuyao_n1').value);
-  const ln2=parseInt($('liuyao_n2').value);
+  if(birth){req.birth_year=birth.year;req.birth_month=birth.month;req.birth_day=birth.day;req.birth_hour=birth.hour;req.birth_minute=birth.minute}
+  const ln1=parseInt($('liuyao_n1').value),ln2=parseInt($('liuyao_n2').value);
   if(!isNaN(ln1)&&!isNaN(ln2)) req.liuyao_nums=[ln1,ln2];
-  const mn1=parseInt($('meihua_n1').value);
-  const mn2=parseInt($('meihua_n2').value);
+  const mn1=parseInt($('meihua_n1').value),mn2=parseInt($('meihua_n2').value);
   if(!isNaN(mn1)&&!isNaN(mn2)) req.meihua_nums=[mn1,mn2];
   const az=parseFloat($('q_azimuth').value);
   if(!isNaN(az)) req.azimuth=az;
@@ -403,10 +368,7 @@ async function apiDivine(req){
   if(!res.ok) throw new Error(await readError(res));
   return await res.json();
 }
-async function readError(res){
-  const text=await res.text();
-  try{return JSON.parse(text).detail||text}catch{return text}
-}
+async function readError(res){const text=await res.text();try{return JSON.parse(text).detail||text}catch{return text}}
 
 // ===== SSE Stream Helper =====
 async function streamSSE(url, body, el){
@@ -414,7 +376,7 @@ async function streamSSE(url, body, el){
   if(!res.ok) throw new Error(await readError(res));
   const reader=res.body.getReader();
   const decoder=new TextDecoder();
-  let fullText='';let buffer='';let streamError=null;
+  let fullText='',buffer='',streamError=null;
   while(true){
     const{done,value}=await reader.read();
     if(done)break;
@@ -427,22 +389,19 @@ async function streamSSE(url, body, el){
         if(obj.error){
           streamError=obj.trace_id?`[${obj.trace_id}] ${obj.error}`:obj.error;
           el.innerHTML=`<div class="error-box"><strong>AI 请求失败</strong><br>${escapeHTML(streamError)}</div>`;
-          toast('AI 请求失败，详情已显示在结果区');
-          continue;
+          toast('AI 请求失败');continue;
         }
-        if(obj.token){fullText+=obj.token;if(typeof marked!=='undefined'&&typeof DOMPurify!=='undefined'){el.innerHTML=DOMPurify.sanitize(marked.parse(fullText))+'<span class="cursor"></span>'}else{el.innerHTML=fullText.replace(/\n/g,'<br>')+'<span class="cursor"></span>'}}
-        else if(obj.error){fullText+='\n\n[错误] '+obj.error;if(typeof marked!=='undefined'&&typeof DOMPurify!=='undefined'){el.innerHTML=DOMPurify.sanitize(marked.parse(fullText))}else{el.innerHTML=fullText.replace(/\n/g,'<br>')}}
+        if(obj.token){
+          fullText+=obj.token;
+          if(typeof marked!=='undefined'&&typeof DOMPurify!=='undefined'){el.innerHTML=DOMPurify.sanitize(marked.parse(fullText))+'<span class="cursor"></span>'}
+          else{el.innerHTML=fullText.replace(/\n/g,'<br>')+'<span class="cursor"></span>'}
+        }
       }catch{}
     }
   }
-  // 流式结束后统一解析 Markdown
   if(streamError) throw new Error(streamError);
-  if(typeof marked!=='undefined'&&typeof DOMPurify!=='undefined'){
-    const rawHtml=marked.parse(fullText);
-    el.innerHTML=DOMPurify.sanitize(rawHtml);
-  }else{
-    el.innerHTML=fullText.replace(/\n/g,'<br>');
-  }
+  if(typeof marked!=='undefined'&&typeof DOMPurify!=='undefined'){el.innerHTML=DOMPurify.sanitize(marked.parse(fullText))}
+  else{el.innerHTML=fullText.replace(/\n/g,'<br>')}
   return fullText;
 }
 
@@ -535,13 +494,55 @@ function renderMeiHua(data){
   $('meihuaResult').innerHTML=h;
 }
 
+function renderZiWei(data){
+  if(!data||data['错误']){$('ziweiCard').style.display='none';return}
+  $('ziweiCard').style.display='';
+  let h=`<div style="margin-bottom:6px;font-size:.88rem">`;
+  h+=`命宫：${data['命宫']||''} · 身宫：${data['身宫']||''} · ${data['五行局']||''}`;
+  h+=` · 紫微：${data['紫微星位']||''} · 天府：${data['天府星位']||''}`;
+  h+=` · 大限：${data['大限方向']||''}</div>`;
+  if(data['农历月日']){
+    let lunar=`农历：${data['农历月日']}`;
+    if(data['闰月处理']) lunar+=` <span style="color:var(--gold)">（${data['闰月处理']}）</span>`;
+    h+=`<div style="font-size:.82rem;color:var(--text-dim);margin-bottom:4px">${lunar}</div>`;
+  }
+  const sihua=data['四化']||{};
+  h+=`<div style="font-size:.82rem;color:var(--text-dim);margin-bottom:8px">四化：${sihua['化禄']||''}禄 · ${sihua['化权']||''}权 · ${sihua['化科']||''}科 · ${sihua['化忌']||''}忌</div>`;
+  const gong12=data['十二宫']||{};
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:6px">';
+  for(const[name,info] of Object.entries(gong12)){
+    const shen=info['身宫标记']?' <span style="color:var(--gold)">★身</span>':'';
+    const zx=Object.entries(info['主星']||{}).map(([x,mw])=>{
+      const hua=info['四化']?.[x]||'';
+      return `<span style="color:var(--gold)">${x}</span><span style="font-size:.72rem;color:var(--text-dim)">(${mw}${hua?'·'+hua:''})</span>`;
+    }).join(' ');
+    const fx=Object.entries(info['辅星']||{}).map(([x,mw])=>{
+      const hua=info['四化']?.[x]||'';
+      return `${x}<span style="font-size:.72rem;color:var(--text-dim)">(${mw}${hua?'·'+hua:''})</span>`;
+    }).join(' ');
+    h+=`<div style="background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:6px;font-size:.8rem;line-height:1.5">`;
+    h+=`<div style="color:var(--gold);font-weight:700;font-size:.85rem">${name}${shen} <span style="color:var(--text-dim);font-weight:400;font-size:.72rem">${info['干支']||''}</span></div>`;
+    if(zx) h+=`<div>${zx}</div>`;
+    if(fx) h+=`<div style="color:var(--text-dim)">${fx}</div>`;
+    if(!zx&&!fx) h+=`<div style="color:var(--text-dim)">空宫</div>`;
+    h+=`</div>`;
+  }
+  h+='</div>';
+  const dx=(data['大限']||[]).slice(0,6).map(x=>`${x['年龄段']} ${x['宫名']}`).join(' · ');
+  if(dx) h+=`<div style="margin-top:6px;font-size:.82rem;color:var(--text-dim)">大限：${dx}</div>`;
+  $('ziweiResult').innerHTML=h;
+}
+
 function renderResults(data){
   $('resultArea').style.display='';
   const r=data['术数结果']||{};
   renderBaZi(r['八字']);
+  renderZiWei(r['紫微斗数']);
   renderQiMen(r['奇门遁甲']);
   renderLiuYao(r['六爻']);
   renderMeiHua(r['梅花易数']);
+  $('interpretArea').style.display='';
+  $('interpretHistory').innerHTML='';
   $('resultArea').scrollIntoView({behavior:'smooth'});
 }
 
@@ -552,7 +553,6 @@ let lastRequest=null;
 async function doDivine(){
   const req=buildRequest();if(!req)return;
   lastRequest=req;
-
   const btn=$('btnDivine');btn.disabled=true;btn.textContent='起盘中...';
   try{
     const data=await apiDivine(req);
@@ -562,40 +562,192 @@ async function doDivine(){
   finally{btn.disabled=false;btn.textContent='起卦'}
 }
 
-async function doInterpret(){
-  if(!selectedRoleId){toast('请先选择大师');return}
-  const req=buildRequest();if(!req)return;
-  lastRequest=req;
-
-  const btn=$('btnInterpret');btn.disabled=true;btn.textContent='处理中...';
-  try{
-    const data=await apiDivine(req);
-    lastDivineData=data;
-    renderResults(data);
-
-    $('aiCard').style.display='';
-    $('adviceCard').style.display='none';
-    const aiEl=$('aiResult');aiEl.innerHTML='<span class="cursor"></span>';
-    $('aiCard').scrollIntoView({behavior:'smooth'});
-
-    await streamSSE('/api/interpret', req, aiEl);
-  }catch(e){toast('操作失败: '+e.message)}
-  finally{btn.disabled=false;btn.textContent='起盘 + 解卦'}
-}
-
-async function doAdvice(){
+async function doInterpret2(){
   if(!lastDivineData){toast('请先起卦');return}
   if(!selectedRoleId){toast('请先选择大师');return}
-
-  const btn=$('btnAdvice');btn.disabled=true;btn.textContent='分析中...';
+  const roleName=getSelectedRoleName();
+  const btn=$('btnInterpret2');btn.disabled=true;btn.textContent='解卦中...';
   try{
-    $('adviceCard').style.display='';
-    const advEl=$('adviceResult');advEl.innerHTML='<span class="cursor"></span>';
-    $('adviceCard').scrollIntoView({behavior:'smooth'});
+    const card=createHistoryCard('解卦 — '+roleName);
+    const el=card.querySelector('.ai-result');
+    const body={...lastRequest,role_id:selectedRoleId};
+    await streamSSE('/api/interpret',body,el);
+  }catch(e){toast('解卦失败: '+e.message)}
+  finally{btn.disabled=false;btn.textContent='解卦'}
+}
 
-    await streamSSE('/api/advice', lastRequest, advEl);
-  }catch(e){toast('操作失败: '+e.message)}
+async function doAdvice2(){
+  if(!lastDivineData){toast('请先起卦');return}
+  if(!selectedRoleId){toast('请先选择大师');return}
+  const roleName=getSelectedRoleName();
+  const btn=$('btnAdvice2');btn.disabled=true;btn.textContent='分析中...';
+  try{
+    const card=createHistoryCard('破局建议 — '+roleName);
+    const el=card.querySelector('.ai-result');
+    const body={...lastRequest,role_id:selectedRoleId};
+    await streamSSE('/api/advice',body,el);
+  }catch(e){toast('破局失败: '+e.message)}
   finally{btn.disabled=false;btn.textContent='破局建议'}
+}
+
+function createHistoryCard(title){
+  const wrapper=document.createElement('div');
+  wrapper.className='card';
+  wrapper.innerHTML=`<div class="card-title" onclick="toggleCard(this)"><span>${escapeHTML(title)}</span><span class="arrow">▼</span></div><div class="card-body"><div class="ai-result"><span class="cursor"></span></div></div>`;
+  $('interpretHistory').prepend(wrapper);
+  wrapper.scrollIntoView({behavior:'smooth'});
+  return wrapper;
+}
+
+// ===== Export =====
+function exportText(){
+  if(!lastDivineData){toast('请先起卦');return}
+  const d=lastDivineData;
+  const r=d['术数结果']||{};
+  let t='';
+  t+='==================== 术数排盘 ====================\n';
+  t+=`事件：${d['事件']||''}\n`;
+  const st=d['时空坐标']||{};
+  t+=`时间：${st['时间']||''}\n`;
+  t+=`经度：${st['经度']||''}  纬度：${st['纬度']||''}  城市：${st['城市估算']||''}\n`;
+  const bz=r['八字'];
+  if(bz&&bz['性别']) t+=`性别：${bz['性别']}\n`;
+  else if(lastRequest) t+=`性别：${lastRequest.gender||''}\n`;
+  if(bz&&bz['真太阳时']) t+=`真太阳时：${bz['真太阳时']}\n`;
+  t+='\n';
+  t+=exportBazi(bz);
+  t+=exportZiwei(r['紫微斗数']);
+  t+=exportQimen(r['奇门遁甲']);
+  t+=exportLiuyao(r['六爻']);
+  t+=exportMeihua(r['梅花易数']);
+  t+='==================================================\n';
+  downloadText(t,`卦象_${(d['事件']||'').slice(0,10)}_${new Date().toISOString().slice(0,10)}.txt`);
+}
+
+function exportBazi(data){
+  if(!data||data['错误']) return '';
+  let t='────────── 四柱八字 ──────────\n';
+  const p=data['四柱']||{};
+  t+='       年柱    月柱    日柱    时柱\n';
+  t+=`干支：  ${pad(p['年柱'])}${pad(p['月柱'])}${pad(p['日柱'])}${p['时柱']||''}\n`;
+  const ny=data['纳音']||{};
+  t+=`纳音：  ${pad(ny['年柱'],6)}${pad(ny['月柱'],6)}${pad(ny['日柱'],6)}${ny['时柱']||''}\n`;
+  t+=`\n日主：${data['日主五行']||''}${data['日主阴阳']||''} · ${data['日主强弱']?.判断||''}\n`;
+  t+=`      ${data['日主强弱']?.说明||''}\n`;
+  const wx=data['五行力量']||{};
+  const total=Object.values(wx).reduce((a,b)=>a+b,0)||1;
+  t+='五行：'+Object.entries(wx).map(([k,v])=>`${k}${(v/total*100).toFixed(0)}%`).join(' ')+'\n';
+  const ss=data['神煞']||{};const parts=[];
+  if(ss['天乙贵人']?.length) parts.push('天乙贵人:'+ss['天乙贵人'].join(','));
+  if(ss['驿马']?.length) parts.push('驿马:'+ss['驿马'].join(','));
+  if(ss['桃花']?.length) parts.push('桃花:'+ss['桃花'].join(','));
+  if(ss['旬空']?.length) parts.push('旬空:'+ss['旬空'].join(','));
+  if(parts.length) t+='神煞：'+parts.join(' · ')+'\n';
+  const dy=data['大运'];
+  if(dy){
+    t+=`\n大运：${dy['顺逆']||''} · 起运${dy['起运']?.['年龄']||''}\n`;
+    t+=`      ${dy['依据']||''}\n`;
+    const luck=(dy['运程']||[]).map(x=>`${x['年龄']||''} ${x['干支']||''}`).join(' | ');
+    if(luck) t+=`  ${luck}\n`;
+  }
+  t+='\n';
+  return t;
+}
+
+function exportZiwei(data){
+  if(!data||data['错误']) return '';
+  let t='────────── 紫微斗数 ──────────\n';
+  if(data['农历月日']){
+    t+=`农历：${data['农历月日']}`;
+    if(data['闰月处理']) t+=`（排盘月${data['排盘月']||''}，${data['闰月处理']}）`;
+    t+='\n';
+  }
+  t+=`命宫：${data['命宫']||''} · 身宫：${data['身宫']||''} · ${data['五行局']||''}\n`;
+  t+=`紫微：${data['紫微星位']||''} · 天府：${data['天府星位']||''} · 大限：${data['大限方向']||''}\n`;
+  const sh=data['四化']||{};
+  t+=`四化：${sh['化禄']||''}禄 ${sh['化权']||''}权 ${sh['化科']||''}科 ${sh['化忌']||''}忌\n\n`;
+  const gong12=data['十二宫']||{};
+  for(const[name,info] of Object.entries(gong12)){
+    const shen=info['身宫标记']?' ★身':'';
+    const zx=Object.entries(info['主星']||{}).map(([x,mw])=>{const hua=info['四化']?.[x]||'';return `${x}(${mw}${hua?'·'+hua:''})`;}).join(' ');
+    const fx=Object.entries(info['辅星']||{}).map(([x,mw])=>`${x}(${mw})`).join(' ');
+    const stars=[zx,fx].filter(Boolean).join(' | ')||'空宫';
+    t+=`  ${name}(${info['干支']||''})${shen}: ${stars}\n`;
+  }
+  const dx=(data['大限']||[]).map(x=>`${x['年龄段']} ${x['宫名']}`).join(' | ');
+  if(dx) t+=`\n大限：${dx}\n`;
+  t+='\n';
+  return t;
+}
+
+function exportQimen(data){
+  if(!data||data['错误']) return '';
+  let t='────────── 奇门遁甲 ──────────\n';
+  t+=`${data['遁型']||''}${data['局数']||''}局 · 值符:${data['值符星']||''} · 值使:${data['值使门']||''}\n`;
+  t+=`日:${data['日干支']||''} · 时:${data['时干支']||''}`;
+  if(data['旬空']?.length) t+=` · 旬空:${data['旬空'].join(',')}`;
+  t+='\n\n';
+  const palaces=data['九宫']||{};
+  const order=[4,9,2,3,5,7,8,1,6];
+  const labels=['东南','南','西南','东','中','西','东北','北','西北'];
+  for(let i=0;i<9;i++){
+    const g=order[i];
+    if(g===5){t+=`[中五宫]\n`;continue}
+    const p=palaces[g]||{};
+    t+=`[${labels[i]}] ${p['八卦']||''} 天:${p['天盘']||''} 地:${p['地盘']||''} 星:${p['九星']||''} 门:${p['八门']||''} 神:${p['八神']||''}\n`;
+  }
+  const geju=data['格局']||[];
+  if(geju.length) t+=`格局：${geju.join('；')}\n`;
+  t+='\n';
+  return t;
+}
+
+function exportLiuyao(data){
+  if(!data||data['错误']) return '';
+  let t='────────── 六爻 ──────────\n';
+  t+=`${data['卦名']||''} · ${data['宫属']||''} · 月建:${data['月建']||''} · 日建:${data['日建']||''}`;
+  if(data['月破地支']) t+=` · 月破:${data['月破地支']}`;
+  if(data['旬空地支']?.length) t+=` · 旬空:${data['旬空地支'].join(',')}`;
+  t+='\n\n';
+  t+='爻位  干支  六亲  五行  标记\n';
+  for(const y of(data['六爻']||[])){
+    let marks=[];
+    if(y['动爻']) marks.push(`动→${y['变支']||''}`);
+    if(y['世']) marks.push('世');
+    if(y['应']) marks.push('应');
+    if(y['旬空']) marks.push('空');
+    if(y['月破']) marks.push('破');
+    t+=`${pad(y['爻名']+'爻',4)}  ${pad(y['干支'],4)}  ${pad(y['六亲'],4)}  ${pad(y['五行'],4)}  ${marks.join(' ')}\n`;
+  }
+  t+='\n';
+  return t;
+}
+
+function exportMeihua(data){
+  if(!data||data['错误']) return '';
+  let t='────────── 梅花易数 ──────────\n';
+  const bk=data['本卦']||{},hk=data['互卦']||{},ck=data['变卦']||{},ty=data['体用分析']||{};
+  t+=`本卦：${bk['卦名']||''}（${bk['上卦']||''}上${bk['下卦']||''}下）\n`;
+  t+=`互卦：${hk['卦名']||''}（${hk['上卦']||''}上${hk['下卦']||''}下）\n`;
+  t+=`变卦：${ck['卦名']||''}（${ck['上卦']||''}上${ck['下卦']||''}下）\n`;
+  t+=`动爻：第${data['动爻']||'?'}爻\n`;
+  t+=`体：${ty['体卦']||''}(${ty['体五行']||''}) · 用：${ty['用卦']||''}(${ty['用五行']||''})\n`;
+  t+=`${ty['体用关系']||''} — ${ty['断语']||''}\n`;
+  t+='\n';
+  return t;
+}
+
+function pad(s,len){s=String(s||'');len=len||6;while(s.length<len)s+=' ';return s}
+
+function downloadText(text,filename){
+  const blob=new Blob([text],{type:'text/plain;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download=filename;
+  document.body.appendChild(a);a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('已导出卦象');
 }
 
 // ===== Init =====
@@ -604,19 +756,6 @@ window.addEventListener('DOMContentLoaded',()=>{
   refreshTime();
   initGeoLocation();
 });
-
-// 排盘结果出来后，动态插入破局建议按钮
-const origRenderResults=renderResults;
-renderResults=function(data){
-  origRenderResults(data);
-  // 在结果区末尾添加破局建议按钮（如果还没有）
-  if(!$('btnAdvice')){
-    const div=document.createElement('div');
-    div.style.cssText='text-align:center;margin:16px 0';
-    div.innerHTML='<button class="btn btn-red" id="btnAdvice" onclick="doAdvice()">破局建议</button>';
-    $('resultArea').appendChild(div);
-  }
-};
 </script>
 </body>
 </html>

@@ -151,7 +151,7 @@ def resolve_active_role(role_id: Optional[int]):
 
 
 def do_multi_divination(req):
-    """统一起盘：如提供出生时间且选了八字，八字用出生时间，其余用起卦时间"""
+    """统一起盘：八字/紫微用出生时间，其余用起卦时间"""
     has_birth = all([
         req.birth_year, req.birth_month, req.birth_day,
         req.birth_hour is not None
@@ -160,8 +160,12 @@ def do_multi_divination(req):
     liuyao_nums = tuple(req.liuyao_nums) if req.liuyao_nums and len(req.liuyao_nums) >= 2 else None
     meihua_nums = tuple(req.meihua_nums) if req.meihua_nums and len(req.meihua_nums) >= 2 else None
 
-    if has_birth and '八字' in req.methods:
-        other_methods = [m for m in req.methods if m != '八字']
+    birth_methods = {'八字', '紫微'}
+    need_birth = has_birth and bool(birth_methods & set(req.methods))
+
+    if need_birth:
+        birth_set = [m for m in req.methods if m in birth_methods]
+        other_methods = [m for m in req.methods if m not in birth_methods]
         results = {}
 
         if other_methods:
@@ -177,14 +181,14 @@ def do_multi_divination(req):
             )
             results.update(r.get('术数结果', {}))
 
-        r_bazi = multi_divination(
+        r_birth = multi_divination(
             event=req.event,
             year=req.birth_year, month=req.birth_month, day=req.birth_day,
             hour=req.birth_hour, minute=req.birth_minute or 0,
             longitude=req.longitude, latitude=req.latitude,
-            gender=req.gender, methods=['八字'],
+            gender=req.gender, methods=birth_set,
         )
-        results.update(r_bazi.get('术数结果', {}))
+        results.update(r_birth.get('术数结果', {}))
 
         return {
             '事件': req.event,

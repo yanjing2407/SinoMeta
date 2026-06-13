@@ -286,6 +286,95 @@ def test_jieqi_minute_window():
     print("PASS: test_jieqi_minute_window")
 
 
+def test_ziwei_basic():
+    """紫微斗数基础验证：命宫、五行局、大限方向、大限起始"""
+    from ziwei import pa_pan
+
+    # 1990-05-01 08:00 男 庚午年
+    r = pa_pan(1990, 5, 1, 8, 0, longitude=116.4, gender='男')
+    assert r['命宫'] == '丑', f"命宫应为丑, got {r['命宫']}"
+    assert '6局' in r['五行局'], f"应为火六局, got {r['五行局']}"
+    # 火6局 农历初七 → 安紫微(商余补奇偶)落戌, 天府寅申线对称落午
+    assert r['紫微星位'] == '戌', f"紫微星应为戌, got {r['紫微星位']}"
+    assert r['天府星位'] == '午', f"天府星应为午, got {r['天府星位']}"
+    assert r['大限方向'] == '顺行', f"庚年男应顺行, got {r['大限方向']}"
+    assert r['大限'][0]['大限宫'] == r['命宫'], f"大限首步应从命宫起"
+    assert '十二宫' in r
+    assert len(r['十二宫']) == 12
+
+    # 女命逆行
+    r2 = pa_pan(1990, 5, 1, 8, 0, longitude=116.4, gender='女')
+    assert r2['大限方向'] == '逆行', f"庚年女应逆行, got {r2['大限方向']}"
+
+    # 四化：庚年 太阳禄 武曲权 太阴科 天同忌
+    assert r['四化']['化禄'] == '太阳'
+    assert r['四化']['化权'] == '武曲'
+    assert r['四化']['化科'] == '太阴'
+    assert r['四化']['化忌'] == '天同'
+    print("PASS: test_ziwei_basic")
+
+
+def test_ziwei_anziwei_formula():
+    """安紫微公式（商数/余数/补数奇偶修正）对照权威参考表，寅宫起"""
+    from ziwei import get_ziwei_zhi
+    expected = {
+        2: ['丑','寅','寅','卯','卯','辰','辰','巳','巳','午','午','未','未','申','申',
+            '酉','酉','戌','戌','亥','亥','子','子','丑','丑','寅','寅','卯','卯','辰'],
+        3: ['辰','丑','寅','巳','寅','卯','午','卯','辰','未','辰','巳','申','巳','午',
+            '酉','午','未','戌','未','申','亥','申','酉','子','酉','戌','丑','戌','亥'],
+        4: ['亥','辰','丑','寅','子','巳','寅','卯','丑','午','卯','辰','寅','未','辰',
+            '巳','卯','申','巳','午','辰','酉','午','未','巳','戌','未','申','午','亥'],
+        5: ['午','亥','辰','丑','寅','未','子','巳','寅','卯','申','丑','午','卯','辰',
+            '酉','寅','未','辰','巳','戌','卯','申','巳','午','亥','辰','酉','午','未'],
+        6: ['酉','午','亥','辰','丑','寅','戌','未','子','巳','寅','卯','亥','申','丑',
+            '午','卯','辰','子','酉','寅','未','辰','巳','丑','戌','卯','申','巳','午'],
+    }
+    for ju, table in expected.items():
+        for day in range(1, 31):
+            got = get_ziwei_zhi(day, ju)
+            assert got == table[day - 1], f"局{ju} 日{day}: 紫微应{table[day-1]}, got {got}"
+    print("PASS: test_ziwei_anziwei_formula")
+
+
+def test_ziwei_leap_month():
+    """闰月排盘：以十五日为界，前半按本月、后半按下月；显示月与排盘月分离。
+    2023 闰二月：03-23=闰2月初二(前半,排盘2)，04-06=闰2月十六(后半,排盘3)"""
+    from ziwei import pa_pan
+
+    # 闰二月前半（初二）→ 显示闰2月，排盘月=2
+    r1 = pa_pan(2023, 3, 23, 12, 0, longitude=120.0, gender='男')
+    assert r1['农历月日'] == '闰2月2日', f"应为闰2月2日, got {r1['农历月日']}"
+    assert r1['排盘月'] == 2, f"前半月排盘月应为2, got {r1['排盘月']}"
+    assert '前半月' in r1['闰月处理'], f"应标注前半月, got {r1['闰月处理']}"
+
+    # 闰二月后半（十六）→ 显示仍为闰2月，排盘月=3
+    r2 = pa_pan(2023, 4, 6, 12, 0, longitude=120.0, gender='男')
+    assert r2['农历月日'] == '闰2月16日', f"应为闰2月16日, got {r2['农历月日']}"
+    assert r2['排盘月'] == 3, f"后半月排盘月应为3, got {r2['排盘月']}"
+    assert '后半月' in r2['闰月处理'], f"应标注后半月, got {r2['闰月处理']}"
+
+    # 非闰月不应有闰月处理说明
+    r3 = pa_pan(1990, 5, 1, 8, 0, longitude=116.4, gender='男')
+    assert r3['闰月处理'] == '', f"非闰月不应有折算说明, got {r3['闰月处理']}"
+
+    # 手动传参负数闰月（lunar_month=-2）应与自动转换路径一致归一化
+    r4 = pa_pan(2023, 4, 6, 12, 0, longitude=120.0, gender='男',
+                lunar_month=-2, lunar_day=16)
+    assert r4['农历月日'] == '闰2月16日', f"手动负数闰月应为闰2月16日, got {r4['农历月日']}"
+    assert r4['排盘月'] == 3, f"手动负数闰月后半排盘月应为3, got {r4['排盘月']}"
+    assert r4['命宫'] == r2['命宫'], f"手动与自动路径命宫应一致, got {r4['命宫']} vs {r2['命宫']}"
+    print("PASS: test_ziwei_leap_month")
+
+
+def test_ziwei_registry():
+    """通过 integrate 注册表调用紫微"""
+    from integrate import multi_divination
+    r = multi_divination('测试', 1990, 5, 1, 8, 0, longitude=116.4, gender='男', methods=['紫微'])
+    assert '紫微斗数' in r['术数结果']
+    assert r['术数结果']['紫微斗数']['命宫'] == '丑'
+    print("PASS: test_ziwei_registry")
+
+
 def test_qimen_dongzhi_yangdun():
     """冬至后应切换到阳遁。2024-12-21 冬至17:20:35，18:00应为阳遁"""
     from qimen import get_dun_ju
@@ -318,4 +407,8 @@ if __name__ == '__main__':
     test_liuyao_number_minute()
     test_jieqi_minute_window()
     test_qimen_dongzhi_yangdun()
+    test_ziwei_basic()
+    test_ziwei_anziwei_formula()
+    test_ziwei_leap_month()
+    test_ziwei_registry()
     print("\n=== ALL TESTS PASSED ===")
