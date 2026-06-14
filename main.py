@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from integrate import multi_divination, stream_interpret
 from llm_store import (
+    _looks_local_base_url,
     get_role_config,
     init_db,
     list_admin_config,
@@ -89,6 +90,7 @@ class DivineRequest(BaseModel):
 
 class InterpretRequest(DivineRequest):
     role_id: Optional[int] = None
+    lenient_mode: bool = False
 
 
 class ProviderPayload(BaseModel):
@@ -148,6 +150,10 @@ def resolve_active_role(role_id: Optional[int]):
     if role["api_key_required"] and not role["api_key"]:
         raise HTTPException(status_code=400, detail="请先在后台配置该角色关联模型的 API Key")
     return role
+
+
+def allow_lenient_mode(req: InterpretRequest, role: dict) -> bool:
+    return bool(req.lenient_mode and _looks_local_base_url(role.get("base_url", "")))
 
 
 def do_multi_divination(req):
@@ -236,7 +242,11 @@ async def divine(req: DivineRequest):
 @app.get("/api/roles")
 async def roles():
     """前台角色列表"""
-    return {"roles": list_public_roles()}
+    try:
+        return {"roles": list_public_roles()}
+    except Exception as exc:
+        logger.exception("Role list failed")
+        raise HTTPException(status_code=500, detail=f"角色加载失败：{exc}")
 
 
 @app.get("/api/admin/config")
@@ -274,19 +284,21 @@ async def admin_save_role(
 async def interpret(req: InterpretRequest):
     """解卦接口（SSE流式）"""
     role = resolve_active_role(req.role_id)
+    lenient_mode = allow_lenient_mode(req, role)
 
     result = do_multi_divination(req)
     trace_id = uuid.uuid4().hex[:8]
 
     def event_stream():
         logger.info(
-            "LLM stream start trace=%s endpoint=interpret role=%s provider=%s type=%s model=%s base_url=%s",
+            "LLM stream start trace=%s endpoint=interpret role=%s provider=%s type=%s model=%s base_url=%s lenient=%s",
             trace_id,
             role.get("role_name"),
             role.get("provider_name"),
             role.get("provider_type"),
             role.get("model"),
             role.get("base_url"),
+            lenient_mode,
         )
         try:
             for token in stream_interpret(
@@ -297,6 +309,7 @@ async def interpret(req: InterpretRequest):
                 system_prompt=role["system_prompt"],
                 provider_type=role["provider_type"],
                 prompt_type="interpret",
+                lenient_mode=lenient_mode,
             ):
                 yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
             logger.info("LLM stream done trace=%s endpoint=interpret", trace_id)
@@ -312,19 +325,21 @@ async def interpret(req: InterpretRequest):
 async def advice(req: InterpretRequest):
     """破局建议接口（SSE流式）"""
     role = resolve_active_role(req.role_id)
+    lenient_mode = allow_lenient_mode(req, role)
 
     result = do_multi_divination(req)
     trace_id = uuid.uuid4().hex[:8]
 
     def event_stream():
         logger.info(
-            "LLM stream start trace=%s endpoint=advice role=%s provider=%s type=%s model=%s base_url=%s",
+            "LLM stream start trace=%s endpoint=advice role=%s provider=%s type=%s model=%s base_url=%s lenient=%s",
             trace_id,
             role.get("role_name"),
             role.get("provider_name"),
             role.get("provider_type"),
             role.get("model"),
             role.get("base_url"),
+            lenient_mode,
         )
         try:
             for token in stream_interpret(
@@ -335,6 +350,7 @@ async def advice(req: InterpretRequest):
                 system_prompt=role["system_prompt"],
                 provider_type=role["provider_type"],
                 prompt_type="advice",
+                lenient_mode=lenient_mode,
             ):
                 yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
             logger.info("LLM stream done trace=%s endpoint=advice", trace_id)

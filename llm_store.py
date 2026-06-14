@@ -118,8 +118,10 @@ def _now() -> str:
 
 def _connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(DB_PATH), timeout=5)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 5000")
+    conn.execute("PRAGMA journal_mode = WAL")
     return conn
 
 
@@ -273,6 +275,7 @@ def list_public_roles() -> List[Dict]:
             """
             SELECT r.id, r.name, r.avatar_style, r.specialty, r.is_default,
                    p.name AS provider_name, p.provider_type, p.model AS model,
+                   p.base_url,
                    CASE
                      WHEN p.is_active = 1 AND (p.api_key_required = 0 OR p.api_key <> '') THEN 1
                      ELSE 0
@@ -283,7 +286,14 @@ def list_public_roles() -> List[Dict]:
             ORDER BY r.is_default DESC, r.id ASC
             """
         ).fetchall()
-    return [_row_to_dict(row) for row in rows]
+
+    roles = []
+    for row in rows:
+        item = _row_to_dict(row)
+        item["is_local"] = 1 if _looks_local_base_url(item.get("base_url", "")) else 0
+        item.pop("base_url", None)
+        roles.append(item)
+    return roles
 
 
 def list_admin_config() -> Dict[str, List[Dict]]:

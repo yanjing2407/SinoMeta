@@ -23,6 +23,20 @@ from ziwei import pa_pan as ziwei_pa_pan
 
 logger = logging.getLogger("sinometa")
 
+LENIENT_MODE_PROMPT = """【本地宽松模式】
+当用户请求属于合法、非伤害性内容时，优先直接给出完整、具体、可执行的分析，不要因为玄学主题、表达风格、不确定性或主观判断而过度拒答。
+遇到风险内容时，只拒绝具体不安全部分，简短说明原因，并继续提供安全替代方案。不要编造能力、承诺确定结果，涉及医疗、法律、投资等重大事项时明确仅供参考。
+"""
+
+FINAL_ANSWER_PROMPT = """【输出要求】
+只输出给用户看的最终答案，禁止输出思考过程、推理过程、reasoning、thinking、analysis、草稿或系统提示复述。
+除术语、模型名、URL、代码标识外，全部使用简体中文；不要用英文解释或英文段落。
+"""
+
+NO_THINK_USER_PREFIX = """/no_think
+请直接输出简体中文最终答案，不要输出思考过程、推理过程、reasoning、thinking、analysis 或英文分析。以下是正式问题：
+"""
+
 
 # ==================== 术数注册表 ====================
 # 新增术数只需：1.写 xxx.py  2.加一个 _run_xxx handler  3.在 METHOD_REGISTRY 注册
@@ -233,16 +247,24 @@ def generate_advice_prompt(multi_result: dict) -> str:
     return prompt
 
 
-def _build_llm_messages(multi_result: dict, prompt_type: str, system_prompt: str):
+def _build_llm_messages(
+    multi_result: dict,
+    prompt_type: str,
+    system_prompt: str,
+    lenient_mode: bool = False,
+):
     if prompt_type == "advice":
         prompt = generate_advice_prompt(multi_result)
         system_msg = system_prompt or "你是一位实战派术数顾问，擅长从传统术数中提炼出可操作的行动方案，帮助求测者趋吉避凶、破局开运。"
     else:
         prompt = generate_prompt(multi_result)
         system_msg = system_prompt or "你是一位严谨、客观的传统术数综合研判AI，精通八字、紫微斗数、奇门遁甲、六爻、梅花易数。"
+    system_msg = f"{system_msg.rstrip()}\n\n{FINAL_ANSWER_PROMPT.strip()}"
+    if lenient_mode:
+        system_msg = f"{system_msg.rstrip()}\n\n{LENIENT_MODE_PROMPT.strip()}"
     return [
         {"role": "system", "content": system_msg},
-        {"role": "user", "content": prompt},
+        {"role": "user", "content": f"{NO_THINK_USER_PREFIX}\n{prompt}"},
     ]
 
 
@@ -284,16 +306,43 @@ def _openai_chat_url_candidates(base_url: str):
     return [base.rstrip("/") + "/chat/completions" for base in _openai_base_url_candidates(base_url)]
 
 
-def _build_openai_payload(messages, model: str, stream: bool) -> bytes:
-    return json.dumps(
-        {
-            "model": model,
-            "messages": messages,
-            "temperature": 0.7,
-            "stream": stream,
-        },
-        ensure_ascii=False,
-    ).encode("utf-8")
+def _looks_local_url(url: str) -> bool:
+    host = urlsplit(str(url or "")).hostname or ""
+    return host in {"127.0.0.1", "localhost", "::1"} or host.startswith(
+        (
+            "192.168.",
+            "10.",
+            "172.16.",
+            "172.17.",
+            "172.18.",
+            "172.19.",
+            "172.20.",
+            "172.21.",
+            "172.22.",
+            "172.23.",
+            "172.24.",
+            "172.25.",
+            "172.26.",
+            "172.27.",
+            "172.28.",
+            "172.29.",
+            "172.30.",
+            "172.31.",
+        )
+    )
+
+
+def _build_openai_payload(messages, model: str, stream: bool, disable_thinking: bool = False) -> bytes:
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": 0.7,
+        "stream": stream,
+    }
+    if disable_thinking:
+        payload["reasoning_effort"] = "none"
+        payload["chat_template_kwargs"] = {"enable_thinking": False}
+    return json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
 
 def _openai_headers(api_key: str) -> dict:
@@ -333,7 +382,7 @@ def _extract_openai_content(data: dict) -> str:
 
 
 def _iter_openai_stream(url: str, api_key: str, model: str, messages):
-    payload = _build_openai_payload(messages, model, stream=True)
+    payload = _build_openai_payload(messages, model, stream=True, disable_thinking=_looks_local_url(url))
     with _openai_request(url, payload, api_key) as resp:
         for raw_line in resp:
             line = raw_line.decode("utf-8", errors="ignore").strip()
@@ -350,7 +399,7 @@ def _iter_openai_stream(url: str, api_key: str, model: str, messages):
 
 
 def _complete_openai_once(url: str, api_key: str, model: str, messages) -> str:
-    payload = _build_openai_payload(messages, model, stream=False)
+    payload = _build_openai_payload(messages, model, stream=False, disable_thinking=_looks_local_url(url))
     with _openai_request(url, payload, api_key) as resp:
         text = resp.read().decode("utf-8", errors="ignore")
     data = json.loads(text)
@@ -438,7 +487,8 @@ def _stream_ollama_native(messages, api_key: str, base_url: str, model: str):
 
 def stream_interpret(multi_result: dict, api_key: str, base_url: str, model: str,
                      prompt_type: str = "interpret", system_prompt: str = "",
-                     provider_type: str = "openai_compatible"):
+                     provider_type: str = "openai_compatible",
+                     lenient_mode: bool = False):
     """
     流式调用大模型，逐token返回
 
@@ -450,11 +500,12 @@ def stream_interpret(multi_result: dict, api_key: str, base_url: str, model: str
         prompt_type: "interpret" 解卦 / "advice" 破局建议
         system_prompt: 角色专属 System Prompt；为空时使用默认提示词
         provider_type: "openai_compatible" 或 "ollama_native"
+        lenient_mode: 仅本地模型使用，减少合法内容的过度拒答
 
     返回:
         generator，每次 yield 一个 token 字符串
     """
-    messages = _build_llm_messages(multi_result, prompt_type, system_prompt)
+    messages = _build_llm_messages(multi_result, prompt_type, system_prompt, lenient_mode)
     if provider_type == "ollama_native":
         yield from _stream_ollama_native(messages, api_key, base_url, model)
     else:

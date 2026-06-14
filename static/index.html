@@ -57,6 +57,13 @@ a{color:var(--gold)}
 .btn-red{border-color:var(--red);color:#e88}
 .btn-red:hover{background:var(--red);color:#fff}
 .btn:disabled{opacity:.35;cursor:not-allowed}
+.mode-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--bg2)}
+.mode-row.disabled{opacity:.55}
+.mode-copy{font-size:.82rem;color:var(--text-dim)}
+.mode-copy strong{display:block;color:var(--text);font-size:.88rem}
+.toggle{display:flex;align-items:center;gap:8px;color:var(--gold);font-size:.86rem;white-space:nowrap;cursor:pointer}
+.toggle input{width:16px;height:16px;accent-color:var(--gold)}
+.toggle input:disabled{cursor:not-allowed}
 
 .section-label{font-size:.85rem;color:var(--text-dim);border-left:3px solid var(--gold-dim);padding-left:8px;margin:12px 0 8px}
 
@@ -229,6 +236,13 @@ a{color:var(--gold)}
         <div class="role-grid" id="roleGrid">
           <div style="color:var(--text-dim);font-size:.85rem">正在加载角色...</div>
         </div>
+        <div class="mode-row disabled" id="lenientModeRow">
+          <div class="mode-copy">
+            <strong>本地宽松模式</strong>
+            <span id="lenientModeHint">仅本地模型可用，减少合法内容误拒</span>
+          </div>
+          <label class="toggle"><input type="checkbox" id="lenientMode">启用</label>
+        </div>
         <div class="btn-row">
           <button class="btn btn-primary" id="btnInterpret2" onclick="doInterpret2()">解卦</button>
           <button class="btn btn-red" id="btnAdvice2" onclick="doAdvice2()">破局建议</button>
@@ -255,17 +269,39 @@ function escapeHTML(text){return String(text??'').replace(/[&<>"']/g,ch=>({'&':'
 let roles=[];
 let selectedRoleId=null;
 
-async function loadRoles(){
+function sleep(ms){return new Promise(resolve=>setTimeout(resolve,ms))}
+async function fetchJsonWithRetry(url, options={}, retries=3){
+  let lastError;
+  for(let attempt=0;attempt<retries;attempt++){
+    const controller=new AbortController();
+    const timeout=setTimeout(()=>controller.abort(),options.timeout||8000);
+    try{
+      const res=await fetch(url,{...options,signal:controller.signal});
+      if(!res.ok) throw new Error(await readError(res));
+      return await res.json();
+    }catch(e){
+      lastError=e;
+      if(attempt<retries-1) await sleep(350*(attempt+1));
+    }finally{
+      clearTimeout(timeout);
+    }
+  }
+  throw lastError;
+}
+
+async function loadRoles(showLoading=true){
+  if(showLoading){
+    $('roleGrid').innerHTML='<div style="color:var(--text-dim);font-size:.85rem">正在加载角色...</div>';
+  }
   try{
-    const res=await fetch('/api/roles');
-    if(!res.ok) throw new Error(await res.text());
-    const data=await res.json();
+    const data=await fetchJsonWithRetry('/api/roles',{},4);
     roles=data.roles||[];
     const defaultRole=roles.find(r=>r.is_default)||roles[0];
     selectedRoleId=defaultRole?.id||null;
     renderRoles();
   }catch(e){
-    $('roleGrid').innerHTML='<div style="color:#e88;font-size:.85rem">角色加载失败，请稍后重试</div>';
+    $('roleGrid').innerHTML='<div style="color:#e88;font-size:.85rem">角色加载失败，请稍后重试 <button class="btn" style="margin-left:8px;padding:4px 10px;font-size:.78rem" onclick="loadRoles()">重试</button></div>';
+    updateLenientMode();
   }
 }
 function selectRole(id){
@@ -275,6 +311,7 @@ function selectRole(id){
 function renderRoles(){
   if(!roles.length){
     $('roleGrid').innerHTML='<div style="color:var(--text-dim);font-size:.85rem">暂无可用角色，请先到后台配置</div>';
+    updateLenientMode();
     return;
   }
   $('roleGrid').innerHTML=roles.map(r=>{
@@ -283,17 +320,47 @@ function renderRoles(){
     if(!r.is_configured) cls.push('disabled');
     const configured=r.is_configured?'已配置':'待配置';
     const warn=r.is_configured?'':' warn';
+    const location=r.is_local?'本地':'云端';
     return `<button type="button" class="${cls.join(' ')}" onclick="selectRole(${r.id})">
       <div class="name">${escapeHTML(r.name)}</div>
       <div class="avatar">${escapeHTML(r.avatar_style||'角色')}</div>
       <div class="specialty">${escapeHTML(r.specialty||'综合解读')}</div>
-      <div class="meta${warn}">${escapeHTML(r.provider_name||'')} · ${escapeHTML(r.model||'')} · ${configured}</div>
+      <div class="meta${warn}">${escapeHTML(r.provider_name||'')} · ${escapeHTML(r.model||'')} · ${location} · ${configured}</div>
     </button>`;
   }).join('');
+  updateLenientMode();
+}
+function getSelectedRole(){
+  return roles.find(x=>x.id===selectedRoleId);
 }
 function getSelectedRoleName(){
-  const r=roles.find(x=>x.id===selectedRoleId);
+  const r=getSelectedRole();
   return r?r.name:'未知';
+}
+function stripReasoningText(text){
+  let s=String(text||'');
+  const patterns=[
+    /(?:^|\n)\s*(?:Here'?s a thinking process|Thinking process|Reasoning process|Analysis)\s*:[\s\S]*?(?=\n\s*(?:\d+\.\s*【|#{1,3}\s|【)|$)/i,
+    /(?:^|\n)\s*(?:思考过程|推理过程|分析过程)\s*[:：][\s\S]*?(?=\n\s*(?:\d+\.\s*【|#{1,3}\s|【)|$)/,
+  ];
+  for(const pattern of patterns)s=s.replace(pattern,'\n');
+  return s.trim();
+}
+function updateLenientMode(){
+  const row=$('lenientModeRow');
+  const input=$('lenientMode');
+  const hint=$('lenientModeHint');
+  if(!row||!input||!hint)return;
+  const r=getSelectedRole();
+  const enabled=!!(r&&r.is_local&&r.is_configured);
+  input.disabled=!enabled;
+  if(!enabled)input.checked=false;
+  row.classList.toggle('disabled',!enabled);
+  hint.textContent=enabled?'仅对本地模型生效：合法内容尽量直接回答':'仅本地且已配置的模型可启用';
+}
+function getLenientMode(){
+  const r=getSelectedRole();
+  return !!($('lenientMode')?.checked&&r?.is_local);
 }
 
 // ===== DateTime =====
@@ -364,9 +431,7 @@ function buildRequest(){
 
 // ===== API =====
 async function apiDivine(req){
-  const res=await fetch('/api/divine',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(req)});
-  if(!res.ok) throw new Error(await readError(res));
-  return await res.json();
+  return await fetchJsonWithRetry('/api/divine',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(req),timeout:12000},2);
 }
 async function readError(res){const text=await res.text();try{return JSON.parse(text).detail||text}catch{return text}}
 
@@ -400,6 +465,7 @@ async function streamSSE(url, body, el){
     }
   }
   if(streamError) throw new Error(streamError);
+  fullText=stripReasoningText(fullText);
   if(typeof marked!=='undefined'&&typeof DOMPurify!=='undefined'){el.innerHTML=DOMPurify.sanitize(marked.parse(fullText))}
   else{el.innerHTML=fullText.replace(/\n/g,'<br>')}
   return fullText;
@@ -570,7 +636,7 @@ async function doInterpret2(){
   try{
     const card=createHistoryCard('解卦 — '+roleName);
     const el=card.querySelector('.ai-result');
-    const body={...lastRequest,role_id:selectedRoleId};
+    const body={...lastRequest,role_id:selectedRoleId,lenient_mode:getLenientMode()};
     await streamSSE('/api/interpret',body,el);
   }catch(e){toast('解卦失败: '+e.message)}
   finally{btn.disabled=false;btn.textContent='解卦'}
@@ -584,7 +650,7 @@ async function doAdvice2(){
   try{
     const card=createHistoryCard('破局建议 — '+roleName);
     const el=card.querySelector('.ai-result');
-    const body={...lastRequest,role_id:selectedRoleId};
+    const body={...lastRequest,role_id:selectedRoleId,lenient_mode:getLenientMode()};
     await streamSSE('/api/advice',body,el);
   }catch(e){toast('破局失败: '+e.message)}
   finally{btn.disabled=false;btn.textContent='破局建议'}

@@ -111,7 +111,7 @@ button.secondary:hover{background:var(--bg2);color:var(--text)}
           </div>
           <div class="form-group">
             <label>Base URL 示例</label>
-            <input id="providerHint" value="OpenAI兼容填根地址或 /v1，例如 https://xxapi.com.cn 或 https://xxapi.com.cn/v1；不要填 /chat/completions" disabled>
+            <input id="providerHint" value="OpenAI兼容建议填到 /v1，例如 http://192.168.2.196:1234/v1；不要填 /chat/completions" disabled>
           </div>
         </div>
         <div class="form-group"><label>Base URL</label><input id="providerBaseUrl" placeholder="https://api.deepseek.com"></div>
@@ -183,29 +183,48 @@ function authHeaders(){
   const token=localStorage.getItem('sinometa_admin_token')||'';
   return token?{'Authorization':'Bearer '+token}:{};
 }
+function sleep(ms){return new Promise(resolve=>setTimeout(resolve,ms))}
 function saveToken(){
   localStorage.setItem('sinometa_admin_token',$('adminToken').value.trim());
   toast('Token 已保存');
   loadConfig();
 }
 async function requestJson(url, options={}){
+  const retries=options.retries||1;
+  const timeout=options.timeout||8000;
+  const fetchOptions={...options};
+  delete fetchOptions.retries;
+  delete fetchOptions.timeout;
   const headers={'Content-Type':'application/json',...authHeaders(),...(options.headers||{})};
-  const res=await fetch(url,{...options,headers});
-  if(!res.ok){
-    let msg=await res.text();
-    try{msg=JSON.parse(msg).detail||msg}catch{}
-    throw new Error(msg);
+  let lastError;
+  for(let attempt=0;attempt<retries;attempt++){
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),timeout);
+    try{
+      const res=await fetch(url,{...fetchOptions,headers,signal:controller.signal});
+      if(!res.ok){
+        let msg=await res.text();
+        try{msg=JSON.parse(msg).detail||msg}catch{}
+        throw new Error(msg);
+      }
+      return await res.json();
+    }catch(e){
+      lastError=e;
+      if(attempt<retries-1) await sleep(350*(attempt+1));
+    }finally{
+      clearTimeout(timer);
+    }
   }
-  return await res.json();
+  throw lastError;
 }
 async function loadConfig(){
   try{
-    config=await requestJson('/api/admin/config',{headers:{'Content-Type':'application/json'}});
+    config=await requestJson('/api/admin/config',{headers:{'Content-Type':'application/json'},retries:4});
     renderProviders();
     renderRoles();
     fillProviderSelect();
     fillProviderTemplates();
-  }catch(e){toast('加载失败: '+e.message)}
+  }catch(e){toast('加载失败: '+e.message+'，请稍后重试')}
 }
 function renderProviders(){
   const q=($('providerSearch')?.value||'').trim().toLowerCase();
@@ -214,8 +233,9 @@ function renderProviders(){
     return [p.name,p.model,p.base_url,typeLabel(p.provider_type)].some(v=>String(v||'').toLowerCase().includes(q));
   });
   $('providerList').innerHTML=providers.map(p=>{
+    const configured=p.is_active&&(p.api_key_required?!!p.api_key_masked:true);
     const badges=[
-      r.provider_configured?'<span class="badge ok">模型可用</span>':'<span class="badge off">模型未配置</span>',
+      configured?'<span class="badge ok">模型可用</span>':'<span class="badge off">模型未配置</span>',
       p.is_default?'<span class="badge ok">默认</span>':'',
       p.is_active?'<span class="badge ok">启用</span>':'<span class="badge off">停用</span>',
       '<span class="badge">'+typeLabel(p.provider_type)+'</span>',
@@ -309,7 +329,7 @@ function editProvider(id){
   $('providerActive').checked=!!p.is_active;
   $('providerDefault').checked=!!p.is_default;
   if((p.base_url||'').includes('127.0.0.1')||(p.base_url||'').includes('localhost')||(p.base_url||'').includes('192.168.')){
-    $('providerHint').value='本地模型通常不需要 API Key，请取消“需要 API Key”；OpenAI兼容远程接口填根地址或 /v1。';
+    $('providerHint').value='本地 OpenAI 兼容服务建议填到 /v1，例如 http://192.168.2.196:1234/v1；通常不需要 API Key。';
   }
 }
 async function saveProvider(){

@@ -29,6 +29,114 @@ def test_openai_base_url_normalization():
     print("PASS: test_openai_base_url_normalization")
 
 
+def test_lenient_mode_prompt():
+    from integrate import _build_llm_messages
+
+    sample = {
+        '事件': '测试',
+        '时空坐标': {
+            '时间': '2024-06-15 12:00',
+            '经度': 116.4,
+            '纬度': 39.9,
+            '城市估算': '北京',
+        },
+        '术数结果': {},
+    }
+    normal = _build_llm_messages(sample, "interpret", "角色提示", lenient_mode=False)
+    relaxed = _build_llm_messages(sample, "interpret", "角色提示", lenient_mode=True)
+
+    system_msg = relaxed[0]["content"]
+    assert "本地宽松模式" in system_msg
+    assert "输出要求" in system_msg
+    assert "只输出给用户看的最终答案" in system_msg
+    assert relaxed[1]["content"].startswith("/no_think")
+    assert "不要输出思考过程" in relaxed[1]["content"]
+    assert "过度拒答" in system_msg
+    assert "本地宽松模式" not in normal[0]["content"]
+    for marker in ("GODMODE", "RIOT", "JAILBREAK", "SAFETY RESTRICTIONS", "l33tspeak"):
+        assert marker not in system_msg
+    print("PASS: test_lenient_mode_prompt")
+
+
+def test_openai_excludes_reasoning_content():
+    from integrate import _build_openai_payload, _extract_openai_content
+    import json
+
+    reasoning_only = {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "本地模型只返回了思考字段",
+                }
+            }
+        ]
+    }
+    with_content = {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "正式回答",
+                    "reasoning_content": "思考字段",
+                }
+            }
+        ]
+    }
+
+    assert _extract_openai_content(reasoning_only) == ""
+    assert _extract_openai_content(with_content) == "正式回答"
+
+    default_payload = json.loads(_build_openai_payload([{"role": "user", "content": "你好"}], "cloud-model", False))
+    assert "reasoning_effort" not in default_payload
+    assert "chat_template_kwargs" not in default_payload
+
+    local_payload = json.loads(
+        _build_openai_payload(
+            [{"role": "user", "content": "你好"}],
+            "local-model",
+            False,
+            disable_thinking=True,
+        )
+    )
+    assert local_payload["reasoning_effort"] == "none"
+    assert local_payload["chat_template_kwargs"]["enable_thinking"] is False
+    print("PASS: test_openai_excludes_reasoning_content")
+
+
+def test_admin_provider_renderer_uses_provider_var():
+    from pathlib import Path
+
+    html = Path("static/admin.html").read_text(encoding="utf-8")
+    assert "r.provider_configured" not in html
+    assert "const configured=p.is_active" in html
+    print("PASS: test_admin_provider_renderer_uses_provider_var")
+
+
+def test_frontend_initial_load_retries():
+    from pathlib import Path
+
+    index_html = Path("static/index.html").read_text(encoding="utf-8")
+    admin_html = Path("static/admin.html").read_text(encoding="utf-8")
+    assert "fetchJsonWithRetry('/api/roles'" in index_html
+    assert 'onclick="loadRoles()"' in index_html
+    assert "retries:4" in admin_html
+    print("PASS: test_frontend_initial_load_retries")
+
+
+def test_sqlite_busy_timeout():
+    from llm_store import _connect
+
+    conn = _connect()
+    try:
+        busy_timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+        assert busy_timeout >= 5000
+    finally:
+        conn.close()
+    print("PASS: test_sqlite_busy_timeout")
+
+
 def test_jie_qi_month():
     from calendar_utils import get_jie_qi_month
 
@@ -387,6 +495,11 @@ def test_qimen_dongzhi_yangdun():
 
 if __name__ == '__main__':
     test_openai_base_url_normalization()
+    test_lenient_mode_prompt()
+    test_openai_excludes_reasoning_content()
+    test_admin_provider_renderer_uses_provider_var()
+    test_frontend_initial_load_retries()
+    test_sqlite_busy_timeout()
     test_jie_qi_month()
     test_true_solar_time()
     test_trigram_mapping()
