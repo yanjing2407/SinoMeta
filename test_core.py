@@ -438,6 +438,18 @@ def test_qimen_chaibuf():
     print("PASS: test_qimen_chaibuf")
 
 
+def test_qimen_uses_full_24_jieqi():
+    """lunar_python 的 getPrevJieQi 应返回完整24节气，奇门雨水后应查雨水局表。"""
+    from qimen import _determine_yuan
+    from lunar_python import Solar
+
+    solar = Solar.fromYmdHms(2024, 2, 20, 12, 0, 0)
+    table_jieqi, yuan = _determine_yuan(solar, solar.getLunar())
+    assert table_jieqi == '雨水', f"雨水后应查雨水局表, got {table_jieqi}"
+    assert yuan == 0, f"2024-02-20 甲寅符头日应为上元, got {yuan}"
+    print("PASS: test_qimen_uses_full_24_jieqi")
+
+
 def test_qimen_chai_case():
     """拆补法"拆"：节气后、符头前应回退到上一节气下元。
     2024-02-04 17:00 立春(16:27)后、符头2024-02-05己亥前 → 大寒下元=阳遁6局"""
@@ -446,6 +458,24 @@ def test_qimen_chai_case():
     assert dun == '阳遁', f"应为阳遁, got {dun}"
     assert ju == 6, f"拆补法'拆'应取大寒下元6局, got {ju}"
     print("PASS: test_qimen_chai_case")
+
+
+def test_qimen_find_futou_search_window():
+    from qimen import _find_futou
+    from calendar_utils import ri_zhu
+    from datetime import date
+
+    futou = _find_futou(date(2024, 2, 21))
+    assert futou == date(2024, 2, 25), f"Expected 2024-02-25 己未, got {futou}"
+    assert ri_zhu(futou.year, futou.month, futou.day)[0] == '己'
+    print("PASS: test_qimen_find_futou_search_window")
+
+
+def test_liuyao_gua64_unique():
+    from liuyao import GUA_64
+
+    assert len(GUA_64) == 64, f"GUA_64 should contain 64 unique hexagrams, got {len(GUA_64)}"
+    print("PASS: test_liuyao_gua64_unique")
 
 
 def test_liuyao_number_minute():
@@ -606,6 +636,26 @@ def test_daliuren_basic():
     print("PASS: test_daliuren_basic")
 
 
+def test_daliuren_daytime_boundaries():
+    from daliuren import is_daytime, get_gui_shen_pos
+
+    assert is_daytime('寅') is False, "寅时应为夜"
+    assert is_daytime('卯') is True, "卯时应为昼"
+    assert is_daytime('申') is True, "申时应为昼"
+    assert is_daytime('酉') is False, "酉时应为夜"
+    assert get_gui_shen_pos('甲', '寅') == '未'
+    assert get_gui_shen_pos('甲', '申') == '丑'
+    print("PASS: test_daliuren_daytime_boundaries")
+
+
+def test_daliuren_yue_jiang_uses_zhongqi():
+    from daliuren import get_yue_jiang
+
+    assert get_yue_jiang(2024, 1, 10, 12) == '丑', "小寒后冬至中气仍应取丑将"
+    assert get_yue_jiang(2024, 2, 20, 12) == '亥', "雨水后应取亥将"
+    print("PASS: test_daliuren_yue_jiang_uses_zhongqi")
+
+
 def test_daliuren_registry():
     """通过 integrate 注册表调用大六壬"""
     from integrate import multi_divination
@@ -622,12 +672,15 @@ def test_daliuren_jiuzongmen_branches():
 
     t.test_fu_yin()
     t.test_fan_yin()
+    t.test_fan_yin_prefers_ke_when_present()
     t.test_zei_ke_single()
     t.test_zhi_yi()
     t.test_ke_fa()
     t.test_she_hai()
+    t.test_she_hai_counts_path_relations()
     t.test_yao_ke()
     t.test_ba_zhuan()
+    t.test_yao_ke_before_ba_zhuan()
     t.test_bie_ze()
     t.test_mao_xing()
     print("PASS: test_daliuren_jiuzongmen_branches")
@@ -659,11 +712,16 @@ if __name__ == '__main__':
     test_qimen_day_offset()
     test_liuyao_day_offset()
     test_qimen_chaibuf()
+    test_qimen_uses_full_24_jieqi()
     test_qimen_chai_case()
+    test_qimen_find_futou_search_window()
+    test_liuyao_gua64_unique()
     test_liuyao_number_minute()
     test_jieqi_minute_window()
     test_qimen_dongzhi_yangdun()
     test_daliuren_basic()
+    test_daliuren_daytime_boundaries()
+    test_daliuren_yue_jiang_uses_zhongqi()
     test_daliuren_registry()
     test_daliuren_jiuzongmen_branches()
     test_ziwei_basic()

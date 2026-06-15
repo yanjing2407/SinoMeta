@@ -163,10 +163,10 @@ def get_san_chuan(si_ke, tian_pan, ri_gan):
     常规取法：
     1. 贼克（下克上）
     2. 知一/比用（多克时取与日干阴阳同者，不可决时涉害）
-    3. 八专（四课上下支完全相同）
+    3. 伏吟、返吟为天盘整体特殊局；返吟有克时仍先从克贼取传
     4. 遥克（无四课克贼时，看日干与四课上神遥克）
-    5. 别责、昴星
-    6. 伏吟、返吟为天盘整体特殊局，先判定
+    5. 八专（四课上下支完全相同）
+    6. 别责、昴星
 
     参数:
         si_ke: [(name, 上支, 下支), ...] 四课列表
@@ -177,18 +177,6 @@ def get_san_chuan(si_ke, tian_pan, ri_gan):
     """
     # 提取支阳
     zhi_yang = si_ke[2]
-
-    # 检查伏吟（天盘地盘相同）
-    if all(tian_pan[dz] == dz for dz in DI_ZHI):
-        # 伏吟：初传取日干寄宫，中传取初传天盘，末传取中传天盘
-        chu = GAN_JI_GONG[ri_gan]
-        return _complete(chu, tian_pan, '伏吟')
-
-    # 检查返吟（天盘地盘相冲）
-    if all(tian_pan[dz] == CHONG[dz] for dz in DI_ZHI):
-        # 返吟：初传取日干支下神（支阳课下支）
-        chu = zhi_yang[2]
-        return _complete(chu, tian_pan, '返吟')
 
     # 收集克贼关系
     zei = []  # 贼（下克上）
@@ -212,19 +200,29 @@ def get_san_chuan(si_ke, tian_pan, ri_gan):
     if kek:
         return _resolve_ke_candidates(kek, tian_pan, ri_gan, '克法')
 
-    # 3. 八专判断：四课上下支完全相同（且都是比和）
-    # 伏吟已先判定；这里处理四课局部相同但天盘非全伏吟的情况。
+    # 3. 伏吟（天盘地盘相同）
+    if all(tian_pan[dz] == dz for dz in DI_ZHI):
+        chu = GAN_JI_GONG[ri_gan]
+        return _complete(chu, tian_pan, '伏吟')
+
+    # 4. 返吟（天盘地盘相冲）。有克贼时已在前面取传；无克才按返吟专法。
+    if all(tian_pan[dz] == CHONG[dz] for dz in DI_ZHI):
+        chu = zhi_yang[2]
+        return _complete(chu, tian_pan, '返吟')
+
+    # 5. 遥克法：无四课克贼时，看日干与四课上支五行遥克
+    yk = _yao_ke(si_ke, tian_pan, ri_gan)
+    if yk:
+        return yk
+
+    # 6. 八专判断：四课上下支完全相同（且都是比和）
+    # 放在遥克之后，避免同时满足时抢先取八专。
     if all(u == l for _, u, l in si_ke) and len(bi_he) == 4:
         yang = ri_gan in '甲丙戊庚壬'
         c1 = tian_pan['酉'] if yang else tian_pan['卯']
         return _complete(c1, tian_pan, '八专')
 
-    # 4. 遥克法：无四课克贼时，看日干与四课上支五行遥克
-    yk = _yao_ke(si_ke, tian_pan, ri_gan)
-    if yk:
-        return yk
-
-    # 5. 别责法：四课无克且无遥克，取日干寄宫与日支下神相克者
+    # 7. 别责法：四课无克且无遥克，取日干寄宫与日支下神相克者
     gan_xia = GAN_JI_GONG[ri_gan]  # 干下神
     zhi_xia = zhi_yang[2]  # 支下神（第三课下支）
     gan_zhi_xia_relation = ke_relation(gan_xia, zhi_xia)
@@ -236,7 +234,7 @@ def get_san_chuan(si_ke, tian_pan, ri_gan):
         # 支下神克干下神：初传取干下神
         return _complete(gan_xia, tian_pan, '别责(支克干下神)')
 
-    # 6. 昴星法（默认兜底）
+    # 8. 昴星法（默认兜底）
     yang = ri_gan in '甲丙戊庚壬'
     c1 = tian_pan['酉'] if yang else tian_pan['卯']
     return _complete(c1, tian_pan, f'昴星({"阳" if yang else "阴"}日)')
@@ -277,7 +275,7 @@ def _she_hai(candidates, tp, ri_gan, ktype, prefix=''):
     """
     涉害择传。
 
-    这里用于多个克贼经知一仍不可决时的稳定择传：先取涉害跨度较深者，
+    这里用于多个克贼经知一仍不可决时的稳定择传：先取涉害克数较深者，
     再按孟、仲、季支作为同分裁决，避免多候选退化为随列表顺序取值。
     """
     branch_rank = {
@@ -288,12 +286,26 @@ def _she_hai(candidates, tp, ri_gan, ktype, prefix=''):
 
     def score(item):
         _, upper, lower = item
-        depth = (DI_ZHI.index(upper) - DI_ZHI.index(lower)) % 12
+        depth = _she_hai_depth(upper, lower)
         return depth, branch_rank.get(upper, 0)
 
     chosen = max(candidates, key=score)
     label_prefix = prefix if prefix else ''
     return _complete(chosen[1], tp, f'{label_prefix}涉害({ktype})')
+
+
+def _she_hai_depth(upper, lower):
+    """统计上神从所临下支回归本位途中遇到的克数。"""
+    count = 0
+    start = DI_ZHI.index(lower)
+    end = DI_ZHI.index(upper)
+    steps = (end - start) % 12
+    for i in range(steps + 1):
+        ground = DI_ZHI[(start + i) % 12]
+        relation = ke_relation(upper, ground)
+        if relation in ('贼', '克'):
+            count += 1
+    return count
 
 def _yao_ke(si_ke, tp, ri_gan):
     """
@@ -323,8 +335,8 @@ def _yao_ke(si_ke, tp, ri_gan):
 # ==================== 天将排列 ====================
 
 def is_daytime(shi_chen_zhi):
-    """昼夜判断：寅至未为昼，申至丑为夜"""
-    return 2 <= DI_ZHI.index(shi_chen_zhi) <= 7
+    """昼夜判断：卯至申为昼，酉至寅为夜"""
+    return 3 <= DI_ZHI.index(shi_chen_zhi) <= 8
 
 def get_gui_shen_pos(ri_gan, shi_chen_zhi):
     """天乙贵人位置"""

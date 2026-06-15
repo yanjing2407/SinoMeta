@@ -32,15 +32,31 @@ def test_fan_yin():
     tian_pan = chong_map.copy()
 
     si_ke = [
-        ('第一课', '午', '子'),  # 干阳
-        ('第二课', '子', '午'),  # 干阴
-        ('第三课', '寅', '申'),  # 支阳
-        ('第四课', '申', '寅'),  # 支阴
+        ('第一课', '子', '寅'),  # 无克
+        ('第二课', '子', '寅'),  # 无克
+        ('第三课', '子', '寅'),  # 无克
+        ('第四课', '子', '寅'),  # 无克
     ]
     result = get_san_chuan(si_ke, tian_pan, '甲')
     assert result['起传法'] == '返吟', f"Expected 返吟, got {result['起传法']}"
-    assert result['初传'] == '申', f"Expected 初传=申(支阳下支), got {result['初传']}"
+    assert result['初传'] == '寅', f"Expected 初传=寅(支阳下支), got {result['初传']}"
     print("[OK] 返吟测试通过")
+
+
+def test_fan_yin_prefers_ke_when_present():
+    """返吟盘四课有克贼时，应先按克贼取传。"""
+    chong_map = {'子':'午','丑':'未','寅':'申','卯':'酉','辰':'戌','巳':'亥',
+                 '午':'子','未':'丑','申':'寅','酉':'卯','戌':'辰','亥':'巳'}
+    si_ke = [
+        ('第一课', '午', '子'),  # 贼：子水克午火
+        ('第二课', '戌', '辰'),  # 比和
+        ('第三课', '戌', '辰'),  # 比和
+        ('第四课', '戌', '辰'),  # 比和
+    ]
+    result = get_san_chuan(si_ke, chong_map.copy(), '甲')
+    assert result['起传法'] == '贼克', f"Expected 贼克, got {result['起传法']}"
+    assert result['初传'] == '午', f"Expected 初传=午(有克先取克), got {result['初传']}"
+    print("[OK] 返吟有克先取克测试通过")
 
 
 def test_zei_ke_single():
@@ -111,8 +127,26 @@ def test_she_hai():
     ]
     result = get_san_chuan(si_ke, tian_pan, '甲')
     assert '涉害' in result['起传法'], f"Expected 涉害, got {result['起传法']}"
-    assert result['初传'] == '午', f"Expected 初传=午(涉害较深者), got {result['初传']}"
+    assert result['初传'] == '子', f"Expected 初传=子(涉害克数较深者), got {result['初传']}"
     print("[OK] 涉害法测试通过")
+
+
+def test_she_hai_counts_path_relations():
+    """涉害应按上神回归本位途中遇到的克数，而不是只看位置跨度。"""
+    tian_pan = {'子':'丑','丑':'寅','寅':'卯','卯':'辰','辰':'巳','巳':'午',
+                '午':'未','未':'申','申':'酉','酉':'戌','戌':'亥','亥':'子'}
+
+    # 两个候选上支同为阳支，位置跨度同为5；寅归酉沿途克数多于子归未。
+    si_ke = [
+        ('第一课', '子', '未'),  # 贼：未土克子水
+        ('第二课', '寅', '酉'),  # 贼：酉金克寅木
+        ('第三课', '辰', '辰'),
+        ('第四课', '戌', '戌'),
+    ]
+    result = get_san_chuan(si_ke, tian_pan, '甲')
+    assert '涉害' in result['起传法'], f"Expected 涉害, got {result['起传法']}"
+    assert result['初传'] == '寅', f"Expected 初传=寅(涉害克数更深), got {result['初传']}"
+    print("[OK] 涉害克数测试通过")
 
 
 def test_yao_ke():
@@ -139,8 +173,25 @@ def test_ba_zhuan():
     tian_pan = {'子':'丑','丑':'寅','寅':'卯','卯':'辰','辰':'巳','巳':'午',
                 '午':'未','未':'申','申':'酉','酉':'戌','戌':'亥','亥':'子'}
 
-    # 四课上下都相同（但不是伏吟，因为天盘地盘不同）。
-    # 未土会被甲木遥克，此用例用于确认八专优先于遥克。
+    # 四课上下都相同（但不是伏吟），且上支不与甲木遥克。
+    si_ke = [
+        ('第一课', '子', '子'),
+        ('第二课', '子', '子'),
+        ('第三课', '子', '子'),
+        ('第四课', '子', '子'),
+    ]
+    result = get_san_chuan(si_ke, tian_pan, '甲')
+    assert result['起传法'] == '八专', f"Expected 八专, got {result['起传法']}"
+    # 甲是阳日，应取酉的天盘
+    assert result['初传'] == tian_pan['酉'], f"Expected 初传={tian_pan['酉']}, got {result['初传']}"
+    print("[OK] 八专测试通过")
+
+
+def test_yao_ke_before_ba_zhuan():
+    """同时满足八专和遥克时，先按遥克取传。"""
+    tian_pan = {'子':'丑','丑':'寅','寅':'卯','卯':'辰','辰':'巳','巳':'午',
+                '午':'未','未':'申','申':'酉','酉':'戌','戌':'亥','亥':'子'}
+
     si_ke = [
         ('第一课', '未', '未'),
         ('第二课', '未', '未'),
@@ -148,10 +199,9 @@ def test_ba_zhuan():
         ('第四课', '未', '未'),
     ]
     result = get_san_chuan(si_ke, tian_pan, '甲')
-    assert result['起传法'] == '八专', f"Expected 八专, got {result['起传法']}"
-    # 甲是阳日，应取酉的天盘
-    assert result['初传'] == tian_pan['酉'], f"Expected 初传={tian_pan['酉']}, got {result['初传']}"
-    print("[OK] 八专测试通过")
+    assert result['起传法'] == '遥克(弹射)', f"Expected 遥克(弹射), got {result['起传法']}"
+    assert result['初传'] == '未', f"Expected 初传=未, got {result['初传']}"
+    print("[OK] 遥克先于八专测试通过")
 
 
 def test_bie_ze():
@@ -201,12 +251,15 @@ if __name__ == '__main__':
 
     test_fu_yin()
     test_fan_yin()
+    test_fan_yin_prefers_ke_when_present()
     test_zei_ke_single()
     test_zhi_yi()
     test_ke_fa()
     test_she_hai()
+    test_she_hai_counts_path_relations()
     test_yao_ke()
     test_ba_zhuan()
+    test_yao_ke_before_ba_zhuan()
     test_bie_ze()
     test_mao_xing()
 

@@ -234,7 +234,7 @@ def _determine_yuan(solar, lunar):
 
 def _find_futou(jq_date):
     """从节气日起，找第一个天干为甲或己的符头日"""
-    for i in range(10):
+    for i in range(15):
         check_date = jq_date + timedelta(days=i)
         rz = ri_zhu(check_date.year, check_date.month, check_date.day)
         if rz[0] in ('甲', '己'):
