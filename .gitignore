@@ -1,7 +1,15 @@
 venv/
+.venv/
 __pycache__/
 *.pyc
+*.pyo
 .claude/
+.idea/
 result/
-八字/
 data/
+八字/
+_temp_historical/
+*.db
+*.sqlite
+*.sqlite3
+_zw_out.txt

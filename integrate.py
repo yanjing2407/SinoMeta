@@ -193,6 +193,22 @@ def generate_prompt(multi_result: dict, mode: str = 'concise') -> str:
         return _generate_concise_prompt(event, st, results, result_text)
 
 
+def _format_time_coord(st: dict) -> str:
+    """格式化时空坐标，兼容单时间和起卦/出生双时间。"""
+    lines = []
+    if st.get('起卦时间'):
+        lines.append(f"起卦时间：{st['起卦时间']}")
+    if st.get('出生时间'):
+        lines.append(f"出生时间：{st['出生时间']}")
+    if not lines and st.get('时间'):
+        lines.append(f"时间：{st['时间']}")
+    lines.append(f"经度：{st.get('经度', '')}，纬度：{st.get('纬度', '')}")
+    city = st.get('城市估算')
+    if city:
+        lines.append(f"城市：{city}")
+    return "\n".join(lines)
+
+
 def _generate_concise_prompt(event, st, results, result_text):
     """简洁模式：综合分析，快速给出结论"""
     available_methods = list(results.keys())
@@ -238,6 +254,7 @@ def _generate_concise_prompt(event, st, results, result_text):
     output_text = "\n".join([f"{i+1}. {s}" for i, s in enumerate(output_sections)])
 
     method_list = "、".join(available_methods)
+    time_coord = _format_time_coord(st)
 
     prompt = f"""你是一位精通中国传统术数（{method_list}）的大师。
 请根据以下排盘数据，综合分析事件的发展趋势。
@@ -249,9 +266,7 @@ def _generate_concise_prompt(event, st, results, result_text):
 {event}
 
 # 时空坐标：
-时间：{st['时间']}
-经度：{st['经度']}，纬度：{st['纬度']}
-城市：{st['城市估算']}
+{time_coord}
 
 # 排盘数据：
 {result_text}
@@ -265,6 +280,23 @@ def _generate_concise_prompt(event, st, results, result_text):
 def _generate_expert_prompt(event, st, results, result_text):
     """专家模式：详细的单术数深度分析"""
     available_methods = list(results.keys())
+    time_coord = _format_time_coord(st)
+    section_titles = {
+        '八字': '【八字视角】',
+        '紫微斗数': '【紫微视角】',
+        '奇门遁甲': '【奇门视角】',
+        '六爻': '【六爻视角】',
+        '梅花易数': '【梅花视角】',
+        '大六壬': '【大六壬视角】',
+    }
+    required_sections = [
+        section_titles[m] for m in available_methods if m in section_titles
+    ]
+    required_sections_text = "\n".join(
+        f"{idx + 1}. {title}" for idx, title in enumerate(required_sections)
+    )
+    if required_sections_text:
+        required_sections_text += f"\n{len(required_sections) + 1}. 【综合断语】\n{len(required_sections) + 2}. 【风险提醒与行动建议】"
 
     prompt = f"""你是一位精通中国传统术数的专家级顾问。请对以下排盘数据进行深度专业分析。
 
@@ -272,15 +304,23 @@ def _generate_expert_prompt(event, st, results, result_text):
 {event}
 
 # 时空坐标：
-时间：{st['时间']}
-经度：{st['经度']}，纬度：{st['纬度']}
-城市：{st['城市估算']}
+{time_coord}
 
 # 排盘数据：
 {result_text}
 
 # 分析要求：
-请对每个术数进行详细的专业分析，遵循该术数的经典理论和判断法则。
+这是专家模式，不是摘要模式。请对排盘数据中已经出现的每一个术数逐一详细分析，遵循该术数的经典理论和判断法则。
+
+# 专家模式硬性输出规则：
+1. 必须逐术数单独成章输出，排盘数据里有哪个术数，就必须输出哪个术数章节；不得省略、合并、只挑重点，也不得只分析奇门/大六壬等少数术数。
+2. 每个术数章节都要引用该术数排盘数据中的具体字段或结构，并给出该术数自己的独立判断。
+3. 每个术数章节至少包含：关键盘面依据、吉凶/成败判断、风险点、该术数给出的结论。不要只写一两句泛泛结论。
+4. 如果某个术数数据不足，也必须保留该章节，并明确说明“该术数数据不足，只能作有限参考”，不得跳过。
+5. 输出应明显比简洁模式更详细，先分术数详断，最后再综合汇总。
+
+# 必须按以下章节顺序输出：
+{required_sections_text}
 """
 
     # 为每个存在的术数添加专家级分析指引
@@ -370,7 +410,7 @@ def _generate_expert_prompt(event, st, results, result_text):
    - 第四课（支阴神）：第三课上支的上神，代表事情的暗中变化
    - 四课的克贼关系，判断力量对比
 4. **三传推导**：
-   - 起传方法（贼克、比用、遥克、昴星、伏吟、反吟）及其含义
+   - 起传方法：贼克、知一/比用、涉害、八专、遥克、别责、昴星、伏吟、返吟；同时说明上克下的克法
    - 初传：事情的开始或起因
    - 中传：事情的发展或过程
    - 末传：事情的结果或归宿
@@ -416,6 +456,7 @@ def generate_advice_prompt(multi_result: dict, mode: str = 'concise') -> str:
     result_text = json.dumps(results, ensure_ascii=False, indent=2, default=str)
     available_methods = list(results.keys())
     method_list = "、".join(available_methods)
+    time_coord = _format_time_coord(st)
 
     if mode == 'expert':
         # 根据已选术数动态生成分析维度提示
@@ -442,9 +483,7 @@ def generate_advice_prompt(multi_result: dict, mode: str = 'concise') -> str:
 {event}
 
 # 时空坐标：
-时间：{st['时间']}
-经度：{st['经度']}，纬度：{st['纬度']}
-城市：{st['城市估算']}
+{time_coord}
 
 # 排盘数据：
 {result_text}
@@ -491,9 +530,7 @@ def generate_advice_prompt(multi_result: dict, mode: str = 'concise') -> str:
 {event}
 
 # 时空坐标：
-时间：{st['时间']}
-经度：{st['经度']}，纬度：{st['纬度']}
-城市：{st['城市估算']}
+{time_coord}
 
 # 排盘数据：
 {result_text}

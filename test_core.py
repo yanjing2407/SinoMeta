@@ -58,6 +58,72 @@ def test_lenient_mode_prompt():
     print("PASS: test_lenient_mode_prompt")
 
 
+def test_dual_time_prompt_modes():
+    from integrate import generate_advice_prompt, generate_prompt
+
+    sample = {
+        '事件': '测试双时间',
+        '时空坐标': {
+            '起卦时间': '2026-06-15 10:00',
+            '出生时间': '1990-01-01 08:00',
+            '经度': 116.4,
+            '纬度': 39.9,
+            '城市估算': '',
+        },
+        '术数结果': {'八字': {}, '大六壬': {}},
+    }
+
+    prompts = [
+        generate_prompt(sample, mode='concise'),
+        generate_prompt(sample, mode='expert'),
+        generate_advice_prompt(sample, mode='concise'),
+        generate_advice_prompt(sample, mode='expert'),
+    ]
+    for prompt in prompts:
+        assert '起卦时间：2026-06-15 10:00' in prompt
+        assert '出生时间：1990-01-01 08:00' in prompt
+        assert '经度：116.4，纬度：39.9' in prompt
+    print("PASS: test_dual_time_prompt_modes")
+
+
+def test_expert_prompt_requires_all_method_sections():
+    from integrate import generate_prompt
+
+    sample = {
+        '事件': '妈妈手术吉凶',
+        '时空坐标': {
+            '时间': '2026-06-15 10:00',
+            '经度': 116.4,
+            '纬度': 39.9,
+            '城市估算': '北京',
+        },
+        '术数结果': {
+            '八字': {},
+            '紫微斗数': {},
+            '奇门遁甲': {},
+            '六爻': {},
+            '梅花易数': {},
+            '大六壬': {},
+        },
+    }
+
+    prompt = generate_prompt(sample, mode='expert')
+    assert '专家模式硬性输出规则' in prompt
+    assert '不得省略、合并、只挑重点' in prompt
+    for section in [
+        '【八字视角】',
+        '【紫微视角】',
+        '【奇门视角】',
+        '【六爻视角】',
+        '【梅花视角】',
+        '【大六壬视角】',
+        '【综合断语】',
+        '【风险提醒与行动建议】',
+    ]:
+        assert section in prompt
+    print("PASS: test_expert_prompt_requires_all_method_sections")
+
+
 def test_openai_excludes_reasoning_content():
     from integrate import _build_openai_payload, _extract_openai_content
     import json
@@ -550,9 +616,28 @@ def test_daliuren_registry():
     print("PASS: test_daliuren_registry")
 
 
+def test_daliuren_jiuzongmen_branches():
+    """大六壬九宗门主分支应覆盖生产 get_san_chuan。"""
+    import test_daliuren_jiuzongmen as t
+
+    t.test_fu_yin()
+    t.test_fan_yin()
+    t.test_zei_ke_single()
+    t.test_zhi_yi()
+    t.test_ke_fa()
+    t.test_she_hai()
+    t.test_yao_ke()
+    t.test_ba_zhuan()
+    t.test_bie_ze()
+    t.test_mao_xing()
+    print("PASS: test_daliuren_jiuzongmen_branches")
+
+
 if __name__ == '__main__':
     test_openai_base_url_normalization()
     test_lenient_mode_prompt()
+    test_dual_time_prompt_modes()
+    test_expert_prompt_requires_all_method_sections()
     test_openai_excludes_reasoning_content()
     test_admin_provider_renderer_uses_provider_var()
     test_frontend_initial_load_retries()
@@ -580,6 +665,7 @@ if __name__ == '__main__':
     test_qimen_dongzhi_yangdun()
     test_daliuren_basic()
     test_daliuren_registry()
+    test_daliuren_jiuzongmen_branches()
     test_ziwei_basic()
     test_ziwei_anziwei_formula()
     test_ziwei_leap_month()

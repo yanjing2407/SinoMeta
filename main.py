@@ -318,7 +318,6 @@ async def interpret(req: InterpretRequest):
                 prompt_type="interpret",
                 lenient_mode=lenient_mode,
                 mode=req.mode,
-                subject_status=req.subject_status,
             ):
                 yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
             logger.info("LLM stream done trace=%s endpoint=interpret", trace_id)
@@ -362,7 +361,6 @@ async def advice(req: InterpretRequest):
                 prompt_type="advice",
                 lenient_mode=lenient_mode,
                 mode=req.mode,
-                subject_status=req.subject_status,
             ):
                 yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
             logger.info("LLM stream done trace=%s endpoint=advice", trace_id)

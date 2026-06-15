@@ -11,7 +11,7 @@
     1. 定月将：根据节气确定当月月将
     2. 排天盘：月将加占时，天盘地支顺排
     3. 推四课：日干寄宫得第一课，依次推四课
-    4. 定三传：九宗门（贼克→比用→遥克→昴星→伏吟→反吟）
+    4. 定三传：九宗门（贼克、知一/比用、涉害、遥克、昴星、别责、八专、伏吟、返吟）
     5. 配天将：十二天将随贵神排列
     6. 遁干：三传配天干
     7. 查神煞：旬空、驿马、桃花、华盖等
@@ -158,109 +158,165 @@ def ke_relation(upper, lower):
 
 def get_san_chuan(si_ke, tian_pan, ri_gan):
     """
-    三传推算 - 完整九宗门
-    优先级：贼克→涉害→遥克→昴星→别责→八专→伏吟→返吟→比用
+    三传取法（九宗门主干实现）
+
+    常规取法：
+    1. 贼克（下克上）
+    2. 知一/比用（多克时取与日干阴阳同者，不可决时涉害）
+    3. 八专（四课上下支完全相同）
+    4. 遥克（无四课克贼时，看日干与四课上神遥克）
+    5. 别责、昴星
+    6. 伏吟、返吟为天盘整体特殊局，先判定
+
+    参数:
+        si_ke: [(name, 上支, 下支), ...] 四课列表
+        tian_pan: {地支: 天盘地支} 天盘映射
+        ri_gan: 日干
+
+    返回: {'初传': str, '中传': str, '末传': str, '起传法': str}
     """
-    # 伏吟判断
-    if all(tian_pan[DI_ZHI[i]] == DI_ZHI[i] for i in range(12)):
-        c1 = GAN_JI_GONG[ri_gan]
-        return {'初传':c1, '中传':c1, '末传':c1, '起传法':'伏吟'}
+    # 提取支阳
+    zhi_yang = si_ke[2]
 
-    # 反吟（返吟）判断
-    if all(tian_pan[DI_ZHI[i]] == CHONG[DI_ZHI[i]] for i in range(12)):
-        c1 = tian_pan[GAN_JI_GONG[ri_gan]]
-        return _complete(c1, tian_pan, '返吟')
+    # 检查伏吟（天盘地盘相同）
+    if all(tian_pan[dz] == dz for dz in DI_ZHI):
+        # 伏吟：初传取日干寄宫，中传取初传天盘，末传取中传天盘
+        chu = GAN_JI_GONG[ri_gan]
+        return _complete(chu, tian_pan, '伏吟')
 
-    # 分类四课关系
-    zei, kek, bi_he, shang_sheng, xia_sheng = [], [], [], [], []
-    gan_yang = si_ke[0]  # 第一课（干阳神）
-    gan_yin = si_ke[1]   # 第二课（干阴神）
-    zhi_yang = si_ke[2]  # 第三课（支阳神）
-    zhi_yin = si_ke[3]   # 第四课（支阴神）
+    # 检查返吟（天盘地盘相冲）
+    if all(tian_pan[dz] == CHONG[dz] for dz in DI_ZHI):
+        # 返吟：初传取日干支下神（支阳课下支）
+        chu = zhi_yang[2]
+        return _complete(chu, tian_pan, '返吟')
+
+    # 收集克贼关系
+    zei = []  # 贼（下克上）
+    kek = []  # 克（上克下）
+    bi_he = []
 
     for name, u, l in si_ke:
         r = ke_relation(u, l)
-        if r == '贼': zei.append((name,u,l))
-        elif r == '克': kek.append((name,u,l))
-        elif r == '比和': bi_he.append((name,u,l))
-        elif r == '上生': shang_sheng.append((name,u,l))
-        elif r == '下生': xia_sheng.append((name,u,l))
+        if r == '贼':
+            zei.append((name, u, l))
+        elif r == '克':
+            kek.append((name, u, l))
+        elif r == '比和':
+            bi_he.append((name, u, l))
 
-    # 1. 贼克法：四课有贼
-    if len(zei) == 1:
-        return _complete(zei[0][1], tian_pan, '贼克')
-    if len(zei) > 1:
-        return _bi_yong(zei, tian_pan, ri_gan, '贼克')
+    # 1. 贼克法：先取下克上；多处则知一/涉害择传
+    if zei:
+        return _resolve_ke_candidates(zei, tian_pan, ri_gan, '贼克')
 
-    # 2. 涉害法：四课无克贼，但日干支的上神相克
-    if not zei and not kek:
-        gan_shang = gan_yang[1]  # 干上神
-        zhi_shang = zhi_yang[1]  # 支上神
-        gan_zhi_relation = ke_relation(gan_shang, zhi_shang)
-        if gan_zhi_relation in ['克', '贼']:
-            # 日干上神克日支上神：初传为日支上神
-            if gan_zhi_relation == '克':
-                return _complete(zhi_shang, tian_pan, '涉害(日干克日支)')
-            # 日支上神克日干上神：初传为日干上神
-            else:
-                return _complete(gan_shang, tian_pan, '涉害(日支克日干)')
+    # 2. 无下克上时，处理上克下（克法）；多处同样知一/涉害择传
+    if kek:
+        return _resolve_ke_candidates(kek, tian_pan, ri_gan, '克法')
 
-    # 3. 遥克法：四课无克贼，看日干与四课上神的遥克
+    # 3. 八专判断：四课上下支完全相同（且都是比和）
+    # 伏吟已先判定；这里处理四课局部相同但天盘非全伏吟的情况。
+    if all(u == l for _, u, l in si_ke) and len(bi_he) == 4:
+        yang = ri_gan in '甲丙戊庚壬'
+        c1 = tian_pan['酉'] if yang else tian_pan['卯']
+        return _complete(c1, tian_pan, '八专')
+
+    # 4. 遥克法：无四课克贼时，看日干与四课上支五行遥克
     yk = _yao_ke(si_ke, tian_pan, ri_gan)
-    if yk: return yk
+    if yk:
+        return yk
 
-    # 4. 昴星法：四课无遥克
+    # 5. 别责法：四课无克且无遥克，取日干寄宫与日支下神相克者
+    gan_xia = GAN_JI_GONG[ri_gan]  # 干下神
+    zhi_xia = zhi_yang[2]  # 支下神（第三课下支）
+    gan_zhi_xia_relation = ke_relation(gan_xia, zhi_xia)
+
+    if gan_zhi_xia_relation == '克':
+        # 干下神克支下神：初传取支下神
+        return _complete(zhi_xia, tian_pan, '别责(干克支下神)')
+    if gan_zhi_xia_relation == '贼':
+        # 支下神克干下神：初传取干下神
+        return _complete(gan_xia, tian_pan, '别责(支克干下神)')
+
+    # 6. 昴星法（默认兜底）
     yang = ri_gan in '甲丙戊庚壬'
     c1 = tian_pan['酉'] if yang else tian_pan['卯']
-
-    # 检查是否为别责：四课上下全不克（都是比和、上生、下生、无克）
-    if not zei and not kek:
-        # 还需要检查是否有八专
-        # 八专：四课上下全相同（比和且上下支相同）
-        if all(u == l for _, u, l in si_ke):
-            # 八专课
-            return _complete(c1, tian_pan, '八专')
-
-        # 5. 别责法：四课上下都无克制关系
-        # 别责取日干支下神相克者
-        gan_xia = GAN_JI_GONG[ri_gan]  # 干下神
-        zhi_xia = si_ke[2][2]          # 支下神（第三课下支）
-        gan_zhi_xia_relation = ke_relation(gan_xia, zhi_xia)
-        if gan_zhi_xia_relation in ['克', '贼']:
-            if gan_zhi_xia_relation == '克':
-                return _complete(zhi_xia, tian_pan, '别责(日干克日支)')
-            else:
-                return _complete(gan_xia, tian_pan, '别责(日支克日干)')
-
-    # 6. 昴星法（默认）
     return _complete(c1, tian_pan, f'昴星({"阳" if yang else "阴"}日)')
 
 
 def _complete(c1, tp, method):
-    """补全三传"""
-    return {'初传':c1, '中传':tp[c1], '末传':tp[tp[c1]], '起传法':method}
+    """补全三传：初传→中传→末传"""
+    return {
+        '初传': c1,
+        '中传': tp[c1],
+        '末传': tp[tp[c1]],
+        '起传法': method
+    }
 
-def _bi_yong(kl, tp, ri_gan, ktype):
-    """比用法：多个克贼时取与日干阴阳相同者"""
-    yang = ri_gan in '甲丙戊庚壬'
-    yz = set('子寅辰午申戌')
-    target = yz if yang else (set(DI_ZHI) - yz)
-    for name, u, l in kl:
-        if u in target:
-            return _complete(u, tp, f'比用({"阳" if yang else "阴"}日-{ktype})')
-    return _complete(kl[0][1], tp, f'比用(简化-{ktype})')
+
+def _resolve_ke_candidates(candidates, tp, ri_gan, ktype):
+    """处理四课克贼候选：单一克贼直取，多候选用知一，仍不可决用涉害。"""
+    if len(candidates) == 1:
+        return _complete(candidates[0][1], tp, ktype)
+
+    same = [item for item in candidates if _same_yin_yang(item[1], ri_gan)]
+    if len(same) == 1:
+        yang = ri_gan in '甲丙戊庚壬'
+        return _complete(same[0][1], tp, f'知一({"阳" if yang else "阴"}日-{ktype})')
+    if len(same) > 1:
+        return _she_hai(same, tp, ri_gan, ktype, '知一后')
+    return _she_hai(candidates, tp, ri_gan, ktype, '')
+
+
+def _same_yin_yang(zhi, gan):
+    """判断地支阴阳是否与日干一致。"""
+    yang_zhi = {'子', '寅', '辰', '午', '申', '戌'}
+    yang_gan = gan in '甲丙戊庚壬'
+    return (zhi in yang_zhi) == yang_gan
+
+
+def _she_hai(candidates, tp, ri_gan, ktype, prefix=''):
+    """
+    涉害择传。
+
+    这里用于多个克贼经知一仍不可决时的稳定择传：先取涉害跨度较深者，
+    再按孟、仲、季支作为同分裁决，避免多候选退化为随列表顺序取值。
+    """
+    branch_rank = {
+        '寅': 2, '申': 2, '巳': 2, '亥': 2,  # 孟
+        '子': 1, '午': 1, '卯': 1, '酉': 1,  # 仲
+        '辰': 0, '戌': 0, '丑': 0, '未': 0,  # 季
+    }
+
+    def score(item):
+        _, upper, lower = item
+        depth = (DI_ZHI.index(upper) - DI_ZHI.index(lower)) % 12
+        return depth, branch_rank.get(upper, 0)
+
+    chosen = max(candidates, key=score)
+    label_prefix = prefix if prefix else ''
+    return _complete(chosen[1], tp, f'{label_prefix}涉害({ktype})')
 
 def _yao_ke(si_ke, tp, ri_gan):
-    """遥克法：四课无克贼时取日干与四课上支的遥克"""
-    rw = TIAN_GAN_WX[ri_gan]
-    # 蒿矢：上支克日干
+    """
+    遥克法：日干与四课上支五行遥克
+
+    分为两种：
+    - 蒿矢：四课上支克日干五行
+    - 弹射：日干五行克四课上支
+    """
+    ri_gan_wx = TIAN_GAN_WX[ri_gan]
+
+    # 1. 蒿矢：上支克日干
     for name, u, l in si_ke:
-        if WX_KE.get(DI_ZHI_WX[u]) == rw:
+        u_wx = DI_ZHI_WX[u]
+        if WX_KE.get(u_wx) == ri_gan_wx:
             return _complete(u, tp, '遥克(蒿矢)')
-    # 弹射：日干克上支
+
+    # 2. 弹射：日干克上支
     for name, u, l in si_ke:
-        if WX_KE.get(rw) == DI_ZHI_WX[u]:
+        u_wx = DI_ZHI_WX[u]
+        if WX_KE.get(ri_gan_wx) == u_wx:
             return _complete(u, tp, '遥克(弹射)')
+
     return None
 
 
@@ -333,7 +389,7 @@ def get_xing_nian(birth_year, gender, current_year):
 def pa_pan(year, month, day, hour, minute=0, longitude=120.0,
            birth_year=None, gender='男'):
     """
-    大六壬起盘（完整九宗门）
+    大六壬起盘（九宗门主干实现）
 
     参数:
         year/month/day/hour/minute: 占时（公历）
@@ -345,7 +401,7 @@ def pa_pan(year, month, day, hour, minute=0, longitude=120.0,
 
     实现范围:
         - 月将按中气换将
-        - 完整九宗门：贼克、涉害、遥克、昴星、别责、八专、伏吟、返吟、比用
+        - 九宗门主干：贼克、知一/比用、涉害、八专、遥克、别责、昴星、伏吟、返吟
         - 十二天将、四课、三传、遁干、神煞、本命行年
     """
     # 1. 真太阳时
