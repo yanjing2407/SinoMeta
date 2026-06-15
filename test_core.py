@@ -125,6 +125,17 @@ def test_frontend_initial_load_retries():
     print("PASS: test_frontend_initial_load_retries")
 
 
+def test_frontend_copy_divination_without_event():
+    from pathlib import Path
+
+    index_html = Path("static/index.html").read_text(encoding="utf-8")
+    assert "copyDivinationText" in index_html
+    assert "复制卦象" in index_html
+    assert "buildDivinationText(false)" in index_html
+    assert "if(includeEvent) t+=`事件：" in index_html
+    print("PASS: test_frontend_copy_divination_without_event")
+
+
 def test_sqlite_busy_timeout():
     from llm_store import _connect
 
@@ -493,12 +504,59 @@ def test_qimen_dongzhi_yangdun():
     print("PASS: test_qimen_dongzhi_yangdun")
 
 
+def test_daliuren_basic():
+    """大六壬基础验证：天盘、四课、三传、天将"""
+    from daliuren import pa_pan
+    r = pa_pan(2024, 6, 15, 14, 30, longitude=116.4, birth_year=1990, gender='男')
+
+    # 基础字段存在
+    assert '日干支' in r
+    assert '时干支' in r
+    assert '月将' in r
+    assert '昼夜' in r
+    assert '四课' in r
+    assert '三传' in r
+
+    # 四课应有4条
+    assert len(r['四课']) == 4
+
+    # 三传应有初中末和起传法
+    sc = r['三传']
+    assert '初传' in sc
+    assert '中传' in sc
+    assert '末传' in sc
+    assert '起传法' in sc
+
+    # 每传应有完整信息
+    for pos in ['初传', '中传', '末传']:
+        assert '干支' in sc[pos]
+        assert '天将' in sc[pos]
+        assert '五行' in sc[pos]
+        assert '旺衰' in sc[pos]
+
+    # 昼夜判断：14:30应为昼
+    assert r['昼夜'] == '昼'
+
+    print("PASS: test_daliuren_basic")
+
+
+def test_daliuren_registry():
+    """通过 integrate 注册表调用大六壬"""
+    from integrate import multi_divination
+    r = multi_divination('测试', 2024, 6, 15, 14, 30, longitude=116.4,
+                         birth_year=1990, gender='男', methods=['大六壬'])
+    assert '大六壬' in r['术数结果']
+    assert r['术数结果']['大六壬']['昼夜'] == '昼'
+    print("PASS: test_daliuren_registry")
+
+
 if __name__ == '__main__':
     test_openai_base_url_normalization()
     test_lenient_mode_prompt()
     test_openai_excludes_reasoning_content()
     test_admin_provider_renderer_uses_provider_var()
     test_frontend_initial_load_retries()
+    test_frontend_copy_divination_without_event()
     test_sqlite_busy_timeout()
     test_jie_qi_month()
     test_true_solar_time()
@@ -520,6 +578,8 @@ if __name__ == '__main__':
     test_liuyao_number_minute()
     test_jieqi_minute_window()
     test_qimen_dongzhi_yangdun()
+    test_daliuren_basic()
+    test_daliuren_registry()
     test_ziwei_basic()
     test_ziwei_anziwei_formula()
     test_ziwei_leap_month()

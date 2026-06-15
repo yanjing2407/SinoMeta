@@ -165,7 +165,7 @@ a{color:var(--gold)}
         </div>
       </div>
 
-      <div class="section-label">出生时间（八字/紫微排盘专用，不填则用起卦时间）</div>
+      <div class="section-label">出生时间（八字/紫微需完整，大六壬仅需年份）</div>
       <div class="form-row">
         <div class="form-group"><label>出生年</label><input type="number" id="b_year" placeholder="如1990"></div>
         <div class="form-group"><label>月</label><input type="number" id="b_month" min="1" max="12" placeholder="1-12"></div>
@@ -179,6 +179,7 @@ a{color:var(--gold)}
         <div class="method-group" id="methodGroup">
           <button class="method-btn active" data-val="八字" onclick="toggleMethod(this)">八字</button>
           <button class="method-btn active" data-val="紫微" onclick="toggleMethod(this)">紫微斗数</button>
+          <button class="method-btn" data-val="大六壬" onclick="toggleMethod(this)">大六壬</button>
           <button class="method-btn active" data-val="奇门" onclick="toggleMethod(this)">奇门遁甲</button>
           <button class="method-btn" data-val="六爻" onclick="toggleMethod(this)">六爻</button>
           <button class="method-btn active" data-val="梅花" onclick="toggleMethod(this)">梅花易数</button>
@@ -210,6 +211,10 @@ a{color:var(--gold)}
       <div class="card-title" onclick="toggleCard(this)"><span>紫微斗数</span><span class="arrow">▼</span></div>
       <div class="card-body" id="ziweiResult"></div>
     </div>
+    <div class="card" id="daliurenCard" style="display:none">
+      <div class="card-title" onclick="toggleCard(this)"><span>大六壬</span><span class="arrow">▼</span></div>
+      <div class="card-body" id="daliurenResult"></div>
+    </div>
     <div class="card" id="qimenCard" style="display:none">
       <div class="card-title" onclick="toggleCard(this)"><span>奇门遁甲</span><span class="arrow">▼</span></div>
       <div class="card-body" id="qimenResult"></div>
@@ -225,6 +230,7 @@ a{color:var(--gold)}
 
     <div style="text-align:center;margin:16px 0">
       <button class="btn" onclick="exportText()">导出卦象</button>
+      <button class="btn" onclick="copyDivinationText()">复制卦象</button>
     </div>
   </div>
 
@@ -242,6 +248,16 @@ a{color:var(--gold)}
             <span id="lenientModeHint">仅本地模型可用，减少合法内容误拒</span>
           </div>
           <label class="toggle"><input type="checkbox" id="lenientMode">启用</label>
+        </div>
+        <div style="margin-bottom:12px">
+          <label style="display:block;font-size:.85rem;color:var(--text-dim);margin-bottom:6px">解卦模式</label>
+          <div class="method-group" id="interpretModeGroup">
+            <button class="method-btn active" data-val="concise" onclick="toggleInterpretMode(this)">简洁模式</button>
+            <button class="method-btn" data-val="expert" onclick="toggleInterpretMode(this)">专家模式</button>
+          </div>
+          <div style="font-size:.75rem;color:var(--text-dim);margin-top:4px">
+            简洁模式：快速综合分析 | 专家模式：详细专业解读
+          </div>
         </div>
         <div class="btn-row">
           <button class="btn btn-primary" id="btnInterpret2" onclick="doInterpret2()">解卦</button>
@@ -268,6 +284,17 @@ function escapeHTML(text){return String(text??'').replace(/[&<>"']/g,ch=>({'&':'
 // ===== Roles =====
 let roles=[];
 let selectedRoleId=null;
+let interpretMode='concise'; // 'concise' 或 'expert'
+
+function toggleInterpretMode(el){
+  document.querySelectorAll('#interpretModeGroup .method-btn').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');
+  interpretMode=el.dataset.val;
+}
+
+function getInterpretMode(){
+  return interpretMode;
+}
 
 function sleep(ms){return new Promise(resolve=>setTimeout(resolve,ms))}
 async function fetchJsonWithRetry(url, options={}, retries=3){
@@ -420,6 +447,11 @@ function buildRequest(){
   const req={event,methods,year:dt.year,month:dt.month,day:dt.day,hour:dt.hour,minute:dt.minute,longitude,latitude,gender:$('q_gender').value};
   const birth=getBirthTime();
   if(birth){req.birth_year=birth.year;req.birth_month=birth.month;req.birth_day=birth.day;req.birth_hour=birth.hour;req.birth_minute=birth.minute}
+  else{
+    // 如果选择了大六壬，至少需要出生年份
+    const byear=parseInt($('b_year').value)||0;
+    if(byear&&methods.includes('大六壬')) req.birth_year=byear;
+  }
   const ln1=parseInt($('liuyao_n1').value),ln2=parseInt($('liuyao_n2').value);
   if(!isNaN(ln1)&&!isNaN(ln2)) req.liuyao_nums=[ln1,ln2];
   const mn1=parseInt($('meihua_n1').value),mn2=parseInt($('meihua_n2').value);
@@ -599,11 +631,60 @@ function renderZiWei(data){
   $('ziweiResult').innerHTML=h;
 }
 
+function renderDaLiuRen(data){
+  if(!data||data['错误']){$('daliurenCard').style.display='none';return}
+  $('daliurenCard').style.display='';
+  let h=`<div style="margin-bottom:6px;font-size:.88rem">`;
+  h+=`日干支：${data['日干支']||''} · 时干支：${data['时干支']||''} · 月将：${data['月将']||''}`;
+  h+=` · ${data['昼夜']||''}贵</div>`;
+
+  const sc=data['三传']||{};
+  h+=`<div style="font-size:.82rem;color:var(--text-dim);margin-bottom:8px">起传法：${sc['起传法']||''}</div>`;
+
+  h+=`<div style="margin-bottom:8px"><strong>四课：</strong></div>`;
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:6px;margin-bottom:8px">';
+  for(const ke of (data['四课']||[])){
+    h+=`<div style="background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:6px;font-size:.8rem">`;
+    h+=`<div style="color:var(--gold);font-weight:700">${ke['课名']||''}</div>`;
+    h+=`<div>${ke['上支']||''}(${ke['上天将']||''}) 加 ${ke['下支']||''}</div>`;
+    h+=`<div style="color:var(--text-dim);font-size:.75rem">${ke['关系']||''}</div>`;
+    h+=`</div>`;
+  }
+  h+='</div>';
+
+  h+=`<div style="margin-bottom:4px"><strong>三传：</strong></div>`;
+  for(const pos of ['初传','中传','末传']){
+    const p=sc[pos]||{};
+    h+=`<div style="font-size:.85rem;margin-bottom:4px">`;
+    h+=`<span style="color:var(--gold);font-weight:700">${pos}：</span>${p['干支']||''} `;
+    h+=`${p['天将']||''}(${p['天将含义']||''}) ${p['五行']||''}(${p['旺衰']||''})`;
+    h+=`</div>`;
+  }
+
+  const ss=data['神煞']||{};
+  if(ss['驿马']||ss['华盖']||ss['桃花']){
+    h+=`<div style="font-size:.82rem;color:var(--text-dim);margin-top:6px">`;
+    h+=`神煞：驿马${ss['驿马']||''} 华盖${ss['华盖']||''} 桃花${ss['桃花']||''}`;
+    if(ss['旬空']&&ss['旬空'].length) h+=` 旬空${ss['旬空'].join(',')}`;
+    h+=`</div>`;
+  }
+
+  if(data['本命']||data['行年']){
+    h+=`<div style="font-size:.82rem;color:var(--text-dim);margin-top:4px">`;
+    if(data['本命']) h+=`本命：${data['本命']} `;
+    if(data['行年']) h+=`行年：${data['行年']}`;
+    h+=`</div>`;
+  }
+
+  $('daliurenResult').innerHTML=h;
+}
+
 function renderResults(data){
   $('resultArea').style.display='';
   const r=data['术数结果']||{};
   renderBaZi(r['八字']);
   renderZiWei(r['紫微斗数']);
+  renderDaLiuRen(r['大六壬']);
   renderQiMen(r['奇门遁甲']);
   renderLiuYao(r['六爻']);
   renderMeiHua(r['梅花易数']);
@@ -632,11 +713,13 @@ async function doInterpret2(){
   if(!lastDivineData){toast('请先起卦');return}
   if(!selectedRoleId){toast('请先选择大师');return}
   const roleName=getSelectedRoleName();
+  const mode=getInterpretMode();
+  const modeText=mode==='expert'?'专家模式':'简洁模式';
   const btn=$('btnInterpret2');btn.disabled=true;btn.textContent='解卦中...';
   try{
-    const card=createHistoryCard('解卦 — '+roleName);
+    const card=createHistoryCard(`解卦 — ${roleName} (${modeText})`);
     const el=card.querySelector('.ai-result');
-    const body={...lastRequest,role_id:selectedRoleId,lenient_mode:getLenientMode()};
+    const body={...lastRequest,role_id:selectedRoleId,lenient_mode:getLenientMode(),mode:mode};
     await streamSSE('/api/interpret',body,el);
   }catch(e){toast('解卦失败: '+e.message)}
   finally{btn.disabled=false;btn.textContent='解卦'}
@@ -646,11 +729,13 @@ async function doAdvice2(){
   if(!lastDivineData){toast('请先起卦');return}
   if(!selectedRoleId){toast('请先选择大师');return}
   const roleName=getSelectedRoleName();
+  const mode=getInterpretMode();
+  const modeText=mode==='expert'?'专家模式':'简洁模式';
   const btn=$('btnAdvice2');btn.disabled=true;btn.textContent='分析中...';
   try{
-    const card=createHistoryCard('破局建议 — '+roleName);
+    const card=createHistoryCard(`破局建议 — ${roleName} (${modeText})`);
     const el=card.querySelector('.ai-result');
-    const body={...lastRequest,role_id:selectedRoleId,lenient_mode:getLenientMode()};
+    const body={...lastRequest,role_id:selectedRoleId,lenient_mode:getLenientMode(),mode:mode};
     await streamSSE('/api/advice',body,el);
   }catch(e){toast('破局失败: '+e.message)}
   finally{btn.disabled=false;btn.textContent='破局建议'}
@@ -666,13 +751,12 @@ function createHistoryCard(title){
 }
 
 // ===== Export =====
-function exportText(){
-  if(!lastDivineData){toast('请先起卦');return}
+function buildDivinationText(includeEvent=true){
   const d=lastDivineData;
   const r=d['术数结果']||{};
   let t='';
   t+='==================== 术数排盘 ====================\n';
-  t+=`事件：${d['事件']||''}\n`;
+  if(includeEvent) t+=`事件：${d['事件']||''}\n`;
   const st=d['时空坐标']||{};
   t+=`时间：${st['时间']||''}\n`;
   t+=`经度：${st['经度']||''}  纬度：${st['纬度']||''}  城市：${st['城市估算']||''}\n`;
@@ -683,11 +767,43 @@ function exportText(){
   t+='\n';
   t+=exportBazi(bz);
   t+=exportZiwei(r['紫微斗数']);
+  t+=exportDaliuren(r['大六壬']);
   t+=exportQimen(r['奇门遁甲']);
   t+=exportLiuyao(r['六爻']);
   t+=exportMeihua(r['梅花易数']);
   t+='==================================================\n';
+  return t;
+}
+
+function exportText(){
+  if(!lastDivineData){toast('请先起卦');return}
+  const d=lastDivineData;
+  const t=buildDivinationText(true);
   downloadText(t,`卦象_${(d['事件']||'').slice(0,10)}_${new Date().toISOString().slice(0,10)}.txt`);
+}
+
+async function copyDivinationText(){
+  if(!lastDivineData){toast('请先起卦');return}
+  const text=buildDivinationText(false);
+  try{
+    if(navigator.clipboard&&window.isSecureContext){
+      await navigator.clipboard.writeText(text);
+    }else{
+      const ta=document.createElement('textarea');
+      ta.value=text;
+      ta.style.position='fixed';
+      ta.style.left='-9999px';
+      ta.style.top='0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    toast('已复制卦象');
+  }catch(e){
+    toast('复制失败，请手动选择导出文本');
+  }
 }
 
 function exportBazi(data){
@@ -742,6 +858,41 @@ function exportZiwei(data){
   }
   const dx=(data['大限']||[]).map(x=>`${x['年龄段']} ${x['宫名']}`).join(' | ');
   if(dx) t+=`\n大限：${dx}\n`;
+  t+='\n';
+  return t;
+}
+
+function exportDaliuren(data){
+  if(!data||data['错误']) return '';
+  let t='────────── 大六壬 ──────────\n';
+  t+=`日干支：${data['日干支']||''} · 时干支：${data['时干支']||''}\n`;
+  t+=`月将：${data['月将']||''} · ${data['昼夜']||''}贵\n`;
+
+  const sc=data['三传']||{};
+  t+=`起传法：${sc['起传法']||''}\n\n`;
+
+  t+='四课：\n';
+  for(const ke of (data['四课']||[])){
+    t+=`  ${ke['课名']||''}: ${ke['上支']||''}(${ke['上天将']||''}) 加 ${ke['下支']||''} → ${ke['关系']||''}\n`;
+  }
+
+  t+='\n三传：\n';
+  for(const pos of ['初传','中传','末传']){
+    const p=sc[pos]||{};
+    t+=`  ${pos}: ${p['干支']||''} ${p['天将']||''}(${p['天将含义']||''}) ${p['五行']||''}(${p['旺衰']||''})\n`;
+  }
+
+  const ss=data['神煞']||{};
+  if(ss['驿马']||ss['华盖']||ss['桃花']){
+    t+=`\n神煞：驿马${ss['驿马']||''} 华盖${ss['华盖']||''} 桃花${ss['桃花']||''}`;
+    if(ss['旬空']&&ss['旬空'].length) t+=` 旬空${ss['旬空'].join(',')}`;
+    t+='\n';
+  }
+
+  if(data['本命']||data['行年']){
+    t+=`本命：${data['本命']||''} 行年：${data['行年']||''}\n`;
+  }
+
   t+='\n';
   return t;
 }

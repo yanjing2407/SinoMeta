@@ -91,6 +91,7 @@ class DivineRequest(BaseModel):
 class InterpretRequest(DivineRequest):
     role_id: Optional[int] = None
     lenient_mode: bool = False
+    mode: str = 'concise'  # 'concise' 或 'expert'
 
 
 class ProviderPayload(BaseModel):
@@ -184,6 +185,7 @@ def do_multi_divination(req):
                 liuyao_nums=liuyao_nums,
                 meihua_nums=meihua_nums,
                 azimuth=req.azimuth,
+                birth_year=req.birth_year,
             )
             results.update(r.get('术数结果', {}))
 
@@ -193,6 +195,7 @@ def do_multi_divination(req):
             hour=req.birth_hour, minute=req.birth_minute or 0,
             longitude=req.longitude, latitude=req.latitude,
             gender=req.gender, methods=birth_set,
+            birth_year=req.birth_year,
         )
         results.update(r_birth.get('术数结果', {}))
 
@@ -215,6 +218,7 @@ def do_multi_divination(req):
             liuyao_nums=liuyao_nums,
             meihua_nums=meihua_nums,
             azimuth=req.azimuth,
+            birth_year=req.birth_year,
         )
 
 
@@ -291,7 +295,7 @@ async def interpret(req: InterpretRequest):
 
     def event_stream():
         logger.info(
-            "LLM stream start trace=%s endpoint=interpret role=%s provider=%s type=%s model=%s base_url=%s lenient=%s",
+            "LLM stream start trace=%s endpoint=interpret role=%s provider=%s type=%s model=%s base_url=%s lenient=%s mode=%s",
             trace_id,
             role.get("role_name"),
             role.get("provider_name"),
@@ -299,6 +303,7 @@ async def interpret(req: InterpretRequest):
             role.get("model"),
             role.get("base_url"),
             lenient_mode,
+            req.mode,
         )
         try:
             for token in stream_interpret(
@@ -310,6 +315,7 @@ async def interpret(req: InterpretRequest):
                 provider_type=role["provider_type"],
                 prompt_type="interpret",
                 lenient_mode=lenient_mode,
+                mode=req.mode,
             ):
                 yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
             logger.info("LLM stream done trace=%s endpoint=interpret", trace_id)
@@ -332,7 +338,7 @@ async def advice(req: InterpretRequest):
 
     def event_stream():
         logger.info(
-            "LLM stream start trace=%s endpoint=advice role=%s provider=%s type=%s model=%s base_url=%s lenient=%s",
+            "LLM stream start trace=%s endpoint=advice role=%s provider=%s type=%s model=%s base_url=%s lenient=%s mode=%s",
             trace_id,
             role.get("role_name"),
             role.get("provider_name"),
@@ -340,6 +346,7 @@ async def advice(req: InterpretRequest):
             role.get("model"),
             role.get("base_url"),
             lenient_mode,
+            req.mode,
         )
         try:
             for token in stream_interpret(
@@ -351,6 +358,7 @@ async def advice(req: InterpretRequest):
                 provider_type=role["provider_type"],
                 prompt_type="advice",
                 lenient_mode=lenient_mode,
+                mode=req.mode,
             ):
                 yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
             logger.info("LLM stream done trace=%s endpoint=advice", trace_id)
