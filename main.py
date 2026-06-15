@@ -92,6 +92,7 @@ class InterpretRequest(DivineRequest):
     role_id: Optional[int] = None
     lenient_mode: bool = False
     mode: str = 'concise'  # 'concise' 或 'expert'
+    subject_status: Optional[str] = None  # 'living'(在世) / 'historical'(历史命例) / 'pattern_only'(仅看格局) / auto(自动判断)
 
 
 class ProviderPayload(BaseModel):
@@ -202,7 +203,8 @@ def do_multi_divination(req):
         return {
             '事件': req.event,
             '时空坐标': {
-                '时间': f'{req.year}-{req.month:02d}-{req.day:02d} {req.hour:02d}:{req.minute:02d}',
+                '起卦时间': f'{req.year}-{req.month:02d}-{req.day:02d} {req.hour:02d}:{req.minute:02d}',
+                '出生时间': f'{req.birth_year}-{req.birth_month:02d}-{req.birth_day:02d} {req.birth_hour:02d}:{req.birth_minute or 0:02d}',
                 '经度': req.longitude, '纬度': req.latitude,
                 '城市估算': '',
             },
@@ -316,6 +318,7 @@ async def interpret(req: InterpretRequest):
                 prompt_type="interpret",
                 lenient_mode=lenient_mode,
                 mode=req.mode,
+                subject_status=req.subject_status,
             ):
                 yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
             logger.info("LLM stream done trace=%s endpoint=interpret", trace_id)
@@ -359,6 +362,7 @@ async def advice(req: InterpretRequest):
                 prompt_type="advice",
                 lenient_mode=lenient_mode,
                 mode=req.mode,
+                subject_status=req.subject_status,
             ):
                 yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
             logger.info("LLM stream done trace=%s endpoint=advice", trace_id)
