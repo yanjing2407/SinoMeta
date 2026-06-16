@@ -224,6 +224,10 @@ def test_relationship_page_and_routes_present():
     assert '@app.post("/api/relationship/interpret")' in main_py
     assert "关系复合盘" in relationship_html
     assert "copyDivinationText" in relationship_html
+    assert "useFollowupQuestion" in relationship_html
+    assert "推荐追问卦" in relationship_html
+    assert "补充事实 / 回答追问" in relationship_html
+    assert "context:$('context').value.trim()" in relationship_html
     assert 'href="/relationship"' in index_html
     print("PASS: test_relationship_page_and_routes_present")
 
@@ -275,6 +279,10 @@ def test_relationship_divination_weak_description():
     assert "用户结论" in meta
     assert meta["用户结论"]["一句话结论"]
     assert meta["用户结论"]["候选关系排行"]
+    assert meta["用户结论"]["主框架"]["主框架"]
+    assert meta["用户结论"]["动力"]
+    assert meta["用户结论"]["信息缺口"]
+    assert meta["用户结论"]["推荐追问"]
     assert "事实层" in meta["任务语义汇总"]
     assert "综合断语" in meta
     assert "不直接断言夫妻" in meta["综合断语"]["身份边界"]
@@ -335,6 +343,49 @@ def test_relationship_second_subject_change_diagnostics():
     assert first["排盘变化校验"]["随命主变化"]["关系复合卦"]["第二命主数"] != second["排盘变化校验"]["随命主变化"]["关系复合卦"]["第二命主数"]
     assert first["当前问事盘"]["六爻"]["卦名"] == second["当前问事盘"]["六爻"]["卦名"]
     print("PASS: test_relationship_second_subject_change_diagnostics")
+
+
+def test_relationship_parent_child_prior_suppresses_romance():
+    from relationship import relationship_divination
+
+    payload = {
+        "event": "算算两个命主什么关系",
+        "context": "这是我和儿子",
+        "relation_type": "",
+        "first_subject": {
+            "gender": "男",
+            "birth_year": 1982,
+            "birth_month": 11,
+            "birth_day": 12,
+            "birth_hour": 13,
+            "birth_minute": 15,
+        },
+        "second_subject": {
+            "gender": "男",
+            "birth_year": 2010,
+            "birth_month": 8,
+            "birth_day": 15,
+            "birth_hour": 1,
+            "birth_minute": 0,
+        },
+        "year": 2026,
+        "month": 6,
+        "day": 16,
+        "hour": 6,
+        "minute": 54,
+        "longitude": 118.024093,
+        "latitude": 36.814259,
+    }
+    result = relationship_divination(payload)
+    user = result["元解释器"]["用户结论"]
+    ranking = {item["类型"]: item["强度"] for item in user["候选关系排行"]}
+
+    assert result["补充信息"] == "这是我和儿子"
+    assert result["元解释器"]["关系先验"]["声明亲子"] is True
+    assert user["主框架"]["主框架"] == "责任照护框架"
+    assert ranking["亲缘/照护/长幼关系"] > ranking["婚恋/暧昧/亲密牵连"]
+    assert "伴侣" not in user["推荐追问"][0]["问题"]
+    print("PASS: test_relationship_parent_child_prior_suppresses_romance")
 
 
 def test_sqlite_busy_timeout():
@@ -833,6 +884,7 @@ if __name__ == '__main__':
     test_relationship_page_and_routes_present()
     test_relationship_divination_weak_description()
     test_relationship_second_subject_change_diagnostics()
+    test_relationship_parent_child_prior_suppresses_romance()
     test_sqlite_busy_timeout()
     test_jie_qi_month()
     test_true_solar_time()

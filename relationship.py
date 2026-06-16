@@ -71,6 +71,102 @@ HIGH_RISK_KEYWORDS = {
     "法律纠纷": ["官司", "诉讼", "犯罪", "坐牢", "判刑", "报警"],
     "投资财务": ["投资", "借钱", "贷款", "破产", "债务"],
 }
+
+RELATION_TAXONOMY = {
+    "血缘/亲属": [
+        "父子", "父女", "母子", "母女", "兄弟", "姐妹", "兄妹", "姐弟",
+        "祖孙", "外祖孙", "叔侄", "姑侄", "舅甥", "姨甥", "伯侄",
+        "堂表亲", "外甥/外甥女", "侄子/侄女", "继亲", "养亲", "干亲",
+    ],
+    "婚恋/姻亲": [
+        "夫妻", "前夫前妻", "未婚夫妻", "恋人", "同居伴侣", "情人",
+        "暧昧对象", "前任", "第三者", "情敌", "岳父母", "婆媳",
+        "翁婿", "妯娌", "连襟", "姐夫妹夫", "嫂子弟媳", "儿媳", "女婿",
+    ],
+    "朋友/同辈": [
+        "普通朋友", "密友", "发小", "同学", "同事", "同圈层", "网友",
+        "搭子", "旧识", "贵人", "熟人", "泛泛之交",
+    ],
+    "权责/利益": [
+        "合作伙伴", "合伙人", "上下级", "老板员工", "客户供应商",
+        "债主债务人", "房东租客", "买卖双方", "投资关系", "委托代理",
+        "师徒", "老师学生", "医生病人", "律师客户", "项目伙伴",
+    ],
+    "冲突/纠葛": [
+        "竞争对手", "仇怨对象", "情敌", "诉讼对方", "债务纠纷方",
+        "利益冲突方", "消耗关系", "控制关系", "被拖累关系",
+    ],
+    "照护/依赖": [
+        "照顾者/被照顾者", "监护/被监护", "长辈晚辈", "恩人受恩者",
+        "依赖关系", "救助关系",
+    ],
+}
+
+
+def _taxonomy_summary() -> List[Dict[str, Any]]:
+    return [{"大类": category, "细类": values} for category, values in RELATION_TAXONOMY.items()]
+
+
+def _ranking_strength(ranking: List[Dict[str, Any]], name_part: str) -> float:
+    for item in ranking:
+        if name_part in item.get("类型", ""):
+            return float(item.get("强度", 0.0))
+    return 0.0
+
+
+def _relationship_context_text(payload_or_text: Any) -> str:
+    if isinstance(payload_or_text, dict):
+        return str(payload_or_text.get("context") or payload_or_text.get("补充信息") or payload_or_text.get("additional_context") or "").strip()
+    return str(payload_or_text or "").strip()
+
+
+def _combined_question_text(question: str, context: str = "") -> str:
+    return f"{question or ''}\n{context or ''}".strip()
+
+
+def _demographic_prior(first: Dict[str, Any], second: Dict[str, Any], context: str = "") -> Dict[str, Any]:
+    age_diff = abs((first["出生时间"] - second["出生时间"]).days) / 365.2425
+    same_gender = first["性别"] == second["性别"]
+    text = context or ""
+    parent_child_words = ["父子", "父女", "母子", "母女", "儿子", "女儿", "孩子", "亲子", "血缘", "父亲", "母亲", "爸爸", "妈妈"]
+    partner_words = ["夫妻", "婚恋", "婚姻", "姻缘", "老婆", "老公", "对象", "恋人", "情侣", "男友", "女友", "情人", "暧昧", "伴侣"]
+    care_words = ["照顾", "抚养", "监护", "长辈", "晚辈", "赡养", "养育"]
+    declared_parent_child = any(word in text for word in parent_child_words)
+    declared_partner = any(word in text for word in partner_words)
+    declared_care = any(word in text for word in care_words)
+    long_gap = age_diff >= 18
+    generation_gap = age_diff >= 24
+    partner_allowed = declared_partner or (not same_gender and age_diff < 18)
+    partner_suppressed = not declared_partner and (same_gender or long_gap)
+    care_boost = declared_parent_child or declared_care or long_gap
+    notes = []
+    if generation_gap:
+        notes.append(f"年龄差约{age_diff:.1f}年，强烈提示长幼/亲子/照护语境，婚恋暧昧默认降权。")
+    elif long_gap:
+        notes.append(f"年龄差约{age_diff:.1f}年，优先考虑长幼、照护、权责或师徒上下级语境。")
+    elif same_gender:
+        notes.append("双方同性；未声明婚恋时，妻财/官鬼不优先翻译为恋爱对象。")
+    if declared_parent_child:
+        notes.append("补充信息已声明亲子/父母子女语境。")
+    if declared_partner:
+        notes.append("补充信息已声明伴侣/婚恋语境。")
+    return {
+        "年龄差": round(age_diff, 1),
+        "同性": same_gender,
+        "大年龄差": long_gap,
+        "代际年龄差": generation_gap,
+        "声明亲子": declared_parent_child,
+        "声明伴侣": declared_partner,
+        "声明照护": declared_care,
+        "允许婚恋优先": partner_allowed,
+        "压制婚恋暧昧": partner_suppressed,
+        "提升照护长幼": care_boost,
+        "说明": notes,
+    }
+
+
+def _prior_suppresses_partner(prior: Optional[Dict[str, Any]]) -> bool:
+    return bool(prior and prior.get("压制婚恋暧昧") and not prior.get("声明伴侣"))
 RELATION_TASK_PROFILES = {
     "relationship_identity": {
         "名称": "关系身份/事实类",
@@ -446,8 +542,8 @@ def _ziwei_pair_summary(first: Dict[str, Any], second: Dict[str, Any]) -> Dict[s
     }
 
 
-def _relation_from_question(question: str, first: Dict[str, Any], second: Dict[str, Any]) -> Dict[str, Any]:
-    text = question or ""
+def _relation_from_question(question: str, first: Dict[str, Any], second: Dict[str, Any], context: str = "") -> Dict[str, Any]:
+    text = _combined_question_text(question, context)
     lowered = text.lower()
     evidence = []
     age_diff = abs((first["出生时间"] - second["出生时间"]).days) / 365.2425
@@ -461,6 +557,14 @@ def _relation_from_question(question: str, first: Dict[str, Any], second: Dict[s
             "细分": _parent_child_label(first, second, age_diff),
             "保守层级": "直系亲缘/长辈晚辈关系",
             "置信度": 82 if age_diff >= 14 else 68,
+            "证据": evidence,
+        }
+    if age_diff >= 24 and not has_any(["夫妻", "恋", "暧昧", "情侣", "对象", "情人", "伴侣", "男友", "女友"]):
+        evidence.append(f"年龄差约{age_diff:.1f}年，未声明婚恋，按长幼/照护方向优先识别")
+        return {
+            "细分": _parent_child_label(first, second, age_diff),
+            "保守层级": "长幼/照护/亲缘候选关系",
+            "置信度": 72,
             "证据": evidence,
         }
     if has_any(["夫妻", "婚", "恋", "姻缘", "感情", "复合", "出轨", "老公", "老婆", "男友", "女友"]):
@@ -1010,6 +1114,7 @@ def _relationship_candidate_ranking(
     method_semantics: Dict[str, Any],
     bazi_pair: Dict[str, Any],
     ziwei_pair: Dict[str, Any],
+    prior: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     scores = {
         "婚恋/暧昧/亲密牵连": 0.0,
@@ -1072,6 +1177,35 @@ def _relationship_candidate_ranking(
         scores["婚恋/暧昧/亲密牵连"] -= 0.08
         reasons["婚恋/暧昧/亲密牵连"].append(f"紫微合盘评分{ziwei_score}，不支持直接锁定稳定婚姻结构")
 
+    if prior:
+        age_diff = prior.get("年龄差")
+        if prior.get("声明伴侣"):
+            scores["婚恋/暧昧/亲密牵连"] += 0.38
+            reasons["婚恋/暧昧/亲密牵连"].append("补充信息已声明伴侣/婚恋语境，婚恋候选保留优先级")
+        if prior.get("声明亲子"):
+            scores["亲缘/照护/长幼关系"] += 1.25
+            scores["婚恋/暧昧/亲密牵连"] -= 1.2
+            reasons["亲缘/照护/长幼关系"].append("补充信息已声明亲子/父母子女语境")
+            reasons["婚恋/暧昧/亲密牵连"].append("已声明亲子语境，妻财/官鬼优先解释为资源、责任或照护")
+        elif prior.get("代际年龄差"):
+            scores["亲缘/照护/长幼关系"] += 1.05
+            scores["合作/利益/权责关系"] += 0.25
+            scores["婚恋/暧昧/亲密牵连"] -= 0.85
+            reasons["亲缘/照护/长幼关系"].append(f"年龄差约{age_diff}年，强烈提示长幼、亲子或照护语境")
+            reasons["婚恋/暧昧/亲密牵连"].append("大年龄差且未声明婚恋，婚恋/暧昧默认降权")
+        elif prior.get("大年龄差"):
+            scores["亲缘/照护/长幼关系"] += 0.65
+            scores["合作/利益/权责关系"] += 0.2
+            scores["婚恋/暧昧/亲密牵连"] -= 0.45
+            reasons["亲缘/照护/长幼关系"].append(f"年龄差约{age_diff}年，长幼/照护/权责候选增强")
+            reasons["婚恋/暧昧/亲密牵连"].append("年龄差较大且未声明婚恋，不能把合和象直接翻成暧昧")
+        if prior.get("同性") and not prior.get("声明伴侣"):
+            scores["朋友/同辈互动"] += 0.25
+            scores["合作/利益/权责关系"] += 0.2
+            scores["婚恋/暧昧/亲密牵连"] -= 0.55
+            reasons["朋友/同辈互动"].append("双方同性且未声明婚恋，平辈/社交或亲缘方向需优先消歧")
+            reasons["婚恋/暧昧/亲密牵连"].append("双方同性且未声明婚恋，妻财/官鬼不优先翻译为恋爱对象")
+
     ranked = []
     denominators = {
         "婚恋/暧昧/亲密牵连": 2.2,
@@ -1096,6 +1230,206 @@ def _relationship_not_like(ranking: List[Dict[str, Any]]) -> List[str]:
     return weak[:2]
 
 
+def _has_hex_name(method_semantics: Dict[str, Any], names: List[str]) -> bool:
+    for method in ("六爻", "梅花", "关系复合卦"):
+        info = method_semantics.get(method) or {}
+        text = " ".join(str(x) for x in info.get("证据", []))
+        text += " " + " ".join(str(s.get("依据", "")) for s in info.get("标签", []))
+        if any(name in text for name in names):
+            return True
+    return False
+
+
+def _subtype_strengths(
+    ranking: List[Dict[str, Any]],
+    method_semantics: Dict[str, Any],
+    bazi_pair: Dict[str, Any],
+    ziwei_pair: Dict[str, Any],
+    prior: Optional[Dict[str, Any]] = None,
+) -> Dict[str, float]:
+    intimate = _ranking_strength(ranking, "婚恋") + _ranking_strength(ranking, "亲密")
+    conflict = _ranking_strength(ranking, "冲突")
+    care = _ranking_strength(ranking, "照护") + _ranking_strength(ranking, "亲缘")
+    cooperation = _ranking_strength(ranking, "合作") + _ranking_strength(ranking, "权责")
+    peer = _ranking_strength(ranking, "朋友") + _ranking_strength(ranking, "同辈")
+    bazi_score = int(bazi_pair.get("关系张力评分", 50)) if isinstance(bazi_pair, dict) else 50
+    ziwei_score = int(ziwei_pair.get("紫微合盘评分", 50)) if isinstance(ziwei_pair, dict) else 50
+
+    day_row = next((row for row in bazi_pair.get("四柱对照", []) if row.get("柱位") == "日柱"), {}) if isinstance(bazi_pair, dict) else {}
+    day_rels = (day_row.get("天干关系", []) or []) + (day_row.get("地支关系", []) or [])
+    has_day_union = any(rel == "六合" or "半合" in str(rel) for rel in day_rels)
+    has_day_conflict = any(rel in {"六冲", "六害", "刑"} for rel in day_rels)
+    has_spouse = _collect_label_score(method_semantics, "紫微", ["夫妻", "婚恋"], 1.0, 1.0)
+    has_child = _collect_label_score(method_semantics, "紫微", ["子女", "晚辈", "照护"], 1.0, 1.0)
+    current_change = _collect_label_score(method_semantics, "六爻", ["当前变化点", "动爻"], 1.0, 1.0)
+    current_stable = 0.25 if _has_hex_name(method_semantics, ["恒", "家人"]) else 0.0
+    encounter = 0.35 if _has_hex_name(method_semantics, ["姤"]) else 0.0
+    blocked = 0.25 if _has_hex_name(method_semantics, ["否", "讼", "困", "睽"]) else 0.0
+
+    strengths = {
+        "已成关系框架": max(0.0, intimate * 0.55 + has_spouse * 0.35 + current_stable + (0.18 if has_day_conflict else 0.0) - encounter * 0.35),
+        "未定型吸引框架": max(0.0, intimate * 0.45 + encounter + (0.22 if has_day_union else 0.0) + current_change * 0.18 - has_spouse * 0.15),
+        "责任照护框架": max(0.0, care * 0.55 + has_child * 0.35 + cooperation * 0.2),
+        "合作权责框架": max(0.0, cooperation * 0.65 + _collect_label_score(method_semantics, "六爻", ["权责", "父母", "官鬼"], 0.25, 0.3)),
+        "冲突纠葛框架": max(0.0, conflict * 0.65 + blocked + (0.22 if bazi_score < 45 else 0.0) + (0.15 if ziwei_score < 50 else 0.0)),
+        "朋友同辈框架": max(0.0, peer * 0.8 - intimate * 0.2),
+    }
+    if prior:
+        if prior.get("声明伴侣"):
+            strengths["已成关系框架"] += 0.28
+            strengths["未定型吸引框架"] += 0.12
+        if prior.get("声明亲子"):
+            strengths["责任照护框架"] += 0.75
+            strengths["合作权责框架"] += 0.12
+            strengths["已成关系框架"] *= 0.45
+            strengths["未定型吸引框架"] *= 0.25
+        elif prior.get("代际年龄差"):
+            strengths["责任照护框架"] += 0.55
+            strengths["合作权责框架"] += 0.12
+            strengths["已成关系框架"] *= 0.55
+            strengths["未定型吸引框架"] *= 0.35
+        elif prior.get("大年龄差"):
+            strengths["责任照护框架"] += 0.35
+            strengths["未定型吸引框架"] *= 0.55
+        if prior.get("同性") and not prior.get("声明伴侣"):
+            strengths["朋友同辈框架"] += 0.18
+            strengths["未定型吸引框架"] *= 0.55
+    return strengths
+
+
+def _relationship_framework(
+    ranking: List[Dict[str, Any]],
+    method_semantics: Dict[str, Any],
+    bazi_pair: Dict[str, Any],
+    ziwei_pair: Dict[str, Any],
+    prior: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    strengths = _subtype_strengths(ranking, method_semantics, bazi_pair, ziwei_pair, prior)
+    ordered = sorted(strengths.items(), key=lambda kv: kv[1], reverse=True)
+    primary_name, primary_score = ordered[0]
+    secondary = [name for name, score in ordered[1:3] if score >= 0.28]
+    descriptions = {
+        "已成关系框架": "更像已经形成现实关系框架或长期绑定的亲密关系，重点看责任、磨合和维系质量。",
+        "未定型吸引框架": "更像有吸引、有牵引，但身份或现实框架尚未完全坐实的关系。",
+        "责任照护框架": "更像由照护、家庭、子女、长幼或依赖议题牵动的关系。",
+        "合作权责框架": "更像由现实事务、资源、合作、规则或权责牵动的关系。",
+        "冲突纠葛框架": "更像由冲突、竞争、消耗、旧问题或争执牵动的关系。",
+        "朋友同辈框架": "更像同辈、朋友、同圈层或一般社交互动关系。",
+    }
+    return {
+        "主框架": primary_name,
+        "说明": descriptions.get(primary_name, ""),
+        "强度": round(min(1.0, primary_score), 2),
+        "辅助框架": secondary,
+        "框架评分": {name: round(min(1.0, score), 2) for name, score in ordered},
+    }
+
+
+def _relationship_motives(
+    layers: Dict[str, Any],
+    method_semantics: Dict[str, Any],
+    prior: Optional[Dict[str, Any]] = None,
+) -> List[str]:
+    label_text = " ".join(
+        label
+        for layer in layers.values()
+        for label in layer.get("主要标签", [])
+    )
+    all_text = label_text + " " + json.dumps(method_semantics, ensure_ascii=False, default=str)
+    motives = []
+    checks = [
+        ("吸引牵引", ["亲密", "向合", "关系场亲近", "结构牵引", "婚恋宫位"]),
+        ("责任权责", ["权责", "官鬼", "父母", "现实事务", "规则"]),
+        ("照护依赖", ["照护", "子女", "晚辈", "长辈", "承接"]),
+        ("冲突消耗", ["冲突", "阻隔", "消耗", "损伤", "六冲", "六害", "讼"]),
+        ("暗线疑虑", ["暗线", "疑虑", "玄武", "天空", "保留"]),
+        ("停滞反复", ["停滞", "阻滞", "伏吟", "勾陈", "旬空"]),
+    ]
+    for name, words in checks:
+        if any(word in all_text for word in words):
+            motives.append(name)
+    if prior:
+        if prior.get("声明亲子") or prior.get("代际年龄差"):
+            motives = [m for m in motives if m != "吸引牵引"]
+            motives.insert(0, "照护依赖")
+        elif prior.get("大年龄差"):
+            motives.insert(0, "责任权责")
+        if prior.get("声明伴侣") and "吸引牵引" not in motives:
+            motives.insert(0, "吸引牵引")
+    deduped = []
+    for motive in motives:
+        if motive not in deduped:
+            deduped.append(motive)
+    return deduped[:2] or ["关系动力不集中"]
+
+
+def _relationship_info_gaps(
+    framework: Dict[str, Any],
+    ranking: List[Dict[str, Any]],
+    motives: List[str],
+    declared_relation: str,
+    prior: Optional[Dict[str, Any]] = None,
+) -> List[str]:
+    gaps = []
+    declared = _declared_relation_text(declared_relation)
+    if declared == "未提供":
+        if prior and (prior.get("代际年龄差") or prior.get("声明亲子")):
+            gaps.append("用户未声明现实关系，需确认是否为亲子、长幼照护或师徒上下级等现实框架。")
+        else:
+            gaps.append("用户未声明现实关系，盘面不能证明两人是否已经公开坐实身份。")
+    if prior and prior.get("压制婚恋暧昧") and not prior.get("声明伴侣"):
+        gaps.append("人口学先验不支持默认婚恋解读；需先确认财官象指向资源责任、照护还是合作。")
+    if framework.get("强度", 0) < 0.55:
+        gaps.append("主框架强度不高，需要追问关系是感情、责任还是现实事务主导。")
+    top = ranking[0] if ranking else {}
+    second = ranking[1] if len(ranking) > 1 else {}
+    if second and abs(float(top.get("强度", 0)) - float(second.get("强度", 0))) <= 0.18:
+        gaps.append(f"候选关系接近：{top.get('类型')} 与 {second.get('类型')} 需要消歧。")
+    if any("暗线" in motive or "停滞" in motive for motive in motives):
+        gaps.append("盘面有暗线或停滞，需确认阻力来自对方态度、第三方还是现实条件。")
+    return gaps[:3] or ["当前信息足以给出关系画像，若要确认现实身份仍需用户补充事实。"]
+
+
+def _followup_questions(
+    framework: Dict[str, Any],
+    gaps: List[str],
+    motives: List[str],
+    prior: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, str]]:
+    questions = []
+    if prior and (prior.get("声明亲子") or prior.get("代际年龄差")):
+        questions.append({
+            "问题": "这段关系的现实框架更接近亲子长幼、照护责任，还是师徒/上下级权责？",
+            "用途": "优先消解大年龄差下的亲缘、照护与权责框架。",
+        })
+    elif prior and prior.get("压制婚恋暧昧") and not prior.get("声明伴侣"):
+        questions.append({
+            "问题": "这段关系现实中是亲属、朋友同辈、合作权责，还是另有特殊情感背景？",
+            "用途": "避免把财官或合和象机械解释为恋爱。",
+        })
+    else:
+        questions.append({
+            "问题": "这段关系是否已经进入现实伴侣或固定关系框架？",
+            "用途": "区分已成关系与未定型吸引。",
+        })
+    if any("责任" in motive or "照护" in motive for motive in motives):
+        questions.append({
+            "问题": "这段关系的核心纽带更偏感情吸引，还是责任照护/现实事务？",
+            "用途": "区分婚恋牵引、照护责任和权责合作。",
+        })
+    if any("暗线" in gap or "阻力" in gap or "停滞" in gap for gap in gaps):
+        questions.append({
+            "问题": "当前阻滞主要来自对方态度、第三方因素，还是现实条件？",
+            "用途": "定位关系卡点。",
+        })
+    if framework.get("主框架") == "冲突纠葛框架":
+        questions.append({
+            "问题": "这段关系未来三个月是缓和、继续停滞，还是进入争执？",
+            "用途": "判断近期走向。",
+        })
+    return questions[:3]
+
+
 def _brief_from_labels(labels: List[str], fallback: str) -> str:
     if not labels:
         return fallback
@@ -1109,10 +1443,15 @@ def _build_user_facing_conclusion(
     method_semantics: Dict[str, Any],
     bazi_pair: Dict[str, Any],
     ziwei_pair: Dict[str, Any],
+    prior: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    ranking = _relationship_candidate_ranking(method_semantics, bazi_pair, ziwei_pair)
+    ranking = _relationship_candidate_ranking(method_semantics, bazi_pair, ziwei_pair, prior)
     top = ranking[0] if ranking else {"类型": "关系画像不明", "等级": "低", "强度": 0}
     second = ranking[1] if len(ranking) > 1 else None
+    framework = _relationship_framework(ranking, method_semantics, bazi_pair, ziwei_pair, prior)
+    motives = _relationship_motives(layers, method_semantics, prior)
+    gaps = _relationship_info_gaps(framework, ranking, motives, declared_relation, prior)
+    followups = _followup_questions(framework, gaps, motives, prior)
     not_like = _relationship_not_like(ranking)
 
     fact = _brief_from_labels(layers.get("事实层", {}).get("主要标签", []), "当前事实信号不够集中")
@@ -1128,18 +1467,17 @@ def _build_user_facing_conclusion(
     top_type = top["类型"]
     second_text = f"，其次带有“{second['类型']}”信号" if second and second["强度"] >= 0.35 else ""
     not_like_text = "；不像" + "、".join(not_like) if not_like else ""
-    one_sentence = f"盘面最像“{top_type}”（{top['等级']}）{second_text}{not_like_text}。{boundary}"
+    one_sentence = f"主框架最像“{framework['主框架']}”（{framework['强度']}）{second_text}{not_like_text}。{boundary}"
 
-    if "婚恋" in top_type or "亲密" in top_type:
-        user_answer = "两人的互动质量更偏亲密/伴侣式牵连；如果现实中已是夫妻或伴侣，本盘重点是在说这段关系的状态与稳定性，不是在否认身份。"
-    elif "合作" in top_type:
-        user_answer = "更像有现实事务、权责或合作牵连的关系，亲密象不是主轴。"
-    elif "冲突" in top_type:
-        user_answer = "更像带冲突、竞争或消耗色彩的关系，吸引或往来不一定代表稳定。"
-    elif "照护" in top_type:
-        user_answer = "更像照护、承接、长幼或依赖色彩较重的关系。"
-    else:
-        user_answer = "更像同辈互动或一般社交关系，亲密和结构承诺信号不强。"
+    direct_map = {
+        "已成关系框架": "更像已经成形的关系框架，重点是维系质量与现实责任。",
+        "未定型吸引框架": "更像有吸引和牵引，但身份或现实框架尚未坐实。",
+        "责任照护框架": "更像由照护、家庭或责任议题牵动的关系。",
+        "合作权责框架": "更像由现实事务、权责或合作牵动的关系。",
+        "冲突纠葛框架": "更像由冲突、旧问题或消耗牵动的关系。",
+        "朋友同辈框架": "更像同辈或社交互动关系。",
+    }
+    user_answer = direct_map.get(framework["主框架"], "关系性质暂时只能给出大致画像。")
 
     stability = "偏低"
     bazi_score = int(bazi_pair.get("关系张力评分", 50)) if isinstance(bazi_pair, dict) else 50
@@ -1157,6 +1495,10 @@ def _build_user_facing_conclusion(
         "一句话结论": one_sentence,
         "直接回答": user_answer,
         "最像关系": top,
+        "主框架": framework,
+        "动力": motives,
+        "信息缺口": gaps,
+        "推荐追问": followups,
         "候选关系排行": ranking,
         "不像关系": not_like,
         "当前状态": f"{fact}；过程上见{dynamic}。",
@@ -1179,6 +1521,7 @@ def _build_relationship_meta_interpreter(
     current_question: Dict[str, Any],
     compound_hex: Dict[str, Any],
     identification: Dict[str, Any],
+    prior: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     task = _classify_relationship_task(question, declared_relation)
     weights = _relationship_weights_for_task(task["primary_task"])
@@ -1193,6 +1536,7 @@ def _build_relationship_meta_interpreter(
         method_semantics,
         bazi_pair,
         ziwei_pair,
+        prior,
     )
 
     return {
@@ -1202,6 +1546,7 @@ def _build_relationship_meta_interpreter(
             "权重表": _weight_rows(weights),
         },
         "用户结论": user_conclusion,
+        "关系先验": prior or {},
         "各术数语义标签": method_semantics,
         "任务语义汇总": layers,
         "综合断语": integrated,
@@ -1595,10 +1940,26 @@ def _relation_identification(
     ziwei_pair: Optional[Dict[str, Any]] = None,
     current_question: Optional[Dict[str, Any]] = None,
     compound_hex: Optional[Dict[str, Any]] = None,
+    context: str = "",
+    prior: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    semantic = _relation_from_question(question, first, second)
+    semantic = _relation_from_question(question, first, second, context)
     chart = _relation_from_charts(first, second, bazi_pair, ziwei_pair, current_question, compound_hex)
     declared = _declared_relation_text(declared_relation)
+
+    if prior and _prior_suppresses_partner(prior):
+        scores = chart.get("候选评分") or {}
+        if scores.get("亲密", 0) > scores.get("照护", 0):
+            scores["照护"] = scores.get("照护", 0) + (6 if prior.get("代际年龄差") else 3)
+            scores["合作"] = scores.get("合作", 0) + 2
+            scores["亲密"] = max(0, scores.get("亲密", 0) - (6 if prior.get("代际年龄差") else 3))
+            chart["候选评分"] = scores
+            chart["证据"] = (chart.get("证据") or []) + [
+                "人口学先验压制婚恋默认翻译，财官/合和象优先读作资源、责任、照护或权责牵连"
+            ]
+            if scores.get("照护", 0) >= scores.get("亲密", 0):
+                chart["细分"] = "照护、承接、长幼或依赖色彩较明显"
+                chart["置信度"] = max(chart.get("置信度", 0), 58)
 
     if declared != "未提供":
         fine = declared
@@ -1696,6 +2057,7 @@ def relationship_divination(payload: Dict[str, Any]) -> Dict[str, Any]:
     question = str(payload.get("event") or payload.get("问题") or "").strip()
     if not question:
         raise ValueError("所问问题不能为空")
+    context = _relationship_context_text(payload)
 
     first_raw = payload.get("first_subject") or payload.get("第一命主")
     second_raw = payload.get("second_subject") or payload.get("第二命主")
@@ -1712,6 +2074,7 @@ def relationship_divination(payload: Dict[str, Any]) -> Dict[str, Any]:
     longitude = _as_float(payload.get("longitude"), "经度", 120.0)
     latitude = _as_float(payload.get("latitude"), "纬度", 30.0)
     declared_relation = payload.get("declared_relation") or payload.get("relation_type") or payload.get("用户声明关系") or ""
+    prior_context = _combined_question_text(question, _combined_question_text(str(declared_relation or ""), context))
 
     liuyao_nums = payload.get("liuyao_nums") or []
     meihua_nums = payload.get("meihua_nums") or []
@@ -1723,6 +2086,7 @@ def relationship_divination(payload: Dict[str, Any]) -> Dict[str, Any]:
     second_chart = _build_subject_chart(second, longitude)
     bazi_pair = _bazi_pair_summary(first_chart, second_chart)
     ziwei_pair = _ziwei_pair_summary(first_chart, second_chart)
+    prior = _demographic_prior(first, second, prior_context)
 
     if liuyao_nums and len(liuyao_nums) >= 2:
         liuyao_chart = _safe_call(
@@ -1813,6 +2177,8 @@ def relationship_divination(payload: Dict[str, Any]) -> Dict[str, Any]:
         ziwei_pair,
         current_question,
         compound_hex,
+        context,
+        prior,
     )
     logger.info(
         "REL identify selected=%s layer=%s scores=%s",
@@ -1828,6 +2194,7 @@ def relationship_divination(payload: Dict[str, Any]) -> Dict[str, Any]:
         current_question,
         compound_hex,
         identification,
+        prior,
     )
     raw_chart_points = _build_raw_chart_points(bazi_pair, ziwei_pair, current_question, compound_hex)
     change_diagnostics = _build_change_diagnostics(
@@ -1846,6 +2213,7 @@ def relationship_divination(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         "问题": question,
+        "补充信息": context,
         "用户声明关系": _declared_relation_text(declared_relation),
         "时空坐标": {
             "起卦时间": q_dt.strftime("%Y-%m-%d %H:%M"),
@@ -1906,6 +2274,8 @@ def generate_relationship_prompt(compound_result):
     task = meta.get('问题识别', {})
     user_conc = meta.get('用户结论', {})
     layers = meta.get('任务语义汇总', {})
+    prior = meta.get('关系先验', {})
+    context = compound_result.get('补充信息', '')
 
     top_relation = user_conc.get('最像关系', {})
     ranking = user_conc.get('候选关系排行', [])
@@ -1947,6 +2317,8 @@ def generate_relationship_prompt(compound_result):
     prompt += '\n'
     prompt += '# 用户问题\n'
     prompt += question + '\n'
+    if context:
+        prompt += '补充事实/追问回答：' + context + '\n'
     prompt += '\n'
     prompt += '# 系统任务摘要（只作导航，必须用原始盘核验）\n'
     prompt += '问题类型：' + task_name + '（' + task_desc + '）\n'
@@ -1956,6 +2328,7 @@ def generate_relationship_prompt(compound_result):
     prompt += '当前状态：' + current_state + '\n'
     prompt += '长期稳定性：' + stability + '\n'
     prompt += '发展趋势：' + trend + '\n'
+    prompt += '关系先验：' + json.dumps(prior, ensure_ascii=False, default=str) + '\n'
     prompt += '注意：以上摘要不是最终判词。若换第二命主后八字、紫微、复合卦、大六壬行年出现差异，必须围绕这些差异重判，不得套用上一盘或固定模板。\n'
     prompt += '\n'
     prompt += '# 原始盘要点（解读主依据，必须优先读取）\n'
@@ -1963,6 +2336,14 @@ def generate_relationship_prompt(compound_result):
     prompt += '\n'
     prompt += '# 候选关系排行\n'
     prompt += ranking_text + '\n'
+    prompt += '\n'
+    prompt += '# 主框架与关系库参考\n'
+    prompt += json.dumps(meta.get('用户结论', {}).get('主框架', {}), ensure_ascii=False, indent=2, default=str) + '\n'
+    prompt += json.dumps(_taxonomy_summary(), ensure_ascii=False, indent=2, default=str) + '\n'
+    prompt += '\n'
+    prompt += '# 信息缺口与追问建议\n'
+    prompt += json.dumps(meta.get('用户结论', {}).get('信息缺口', []), ensure_ascii=False, indent=2, default=str) + '\n'
+    prompt += json.dumps(meta.get('用户结论', {}).get('推荐追问', []), ensure_ascii=False, indent=2, default=str) + '\n'
     prompt += '\n'
     prompt += '# 六层语义标签\n'
     prompt += layer_text
@@ -1987,6 +2368,10 @@ def generate_relationship_prompt(compound_result):
     prompt += '9. 如果短期状态与长期结构不一致，直接说“当前如何、长期如何”，不要和稀泥。\n'
     prompt += '10. 输出要信息充分，建议 1200-2000 字；不要只写三小段。\n'
     prompt += '11. 六爻、奇门、梅花属于当前问事盘；只换第二命主生日时，它们不变不能证明两段关系一样。关系性质必须重点核验八字合盘、紫微合盘、关系复合卦和大六壬第二命主行年。\n'
+    prompt += '12. 最终结论必须先写“主关系框架”，再写“关系动力”，不要只写婚恋/暧昧/亲密牵连这类大桶标签。\n'
+    prompt += '13. 如果身份、责任来源或阻滞来源不能确认，必须列出信息缺口和一个定向追问卦问题；追问卦只用于消歧，不能反客为主推翻原盘结构。\n'
+    prompt += '14. 若关系先验显示“大年龄差/代际年龄差/同性且未声明婚恋/声明亲子”，六爻妻财、官鬼、六合、天后等象必须优先翻译为资源、责任、照护、管束、依赖、权责或往来；除非补充事实明确声明婚恋，不得默认写成暧昧、恋人、男女朋友。\n'
+    prompt += '15. 若补充事实或用户声明已经给出现实关系（如儿子、夫妻、同事），不得用盘面反向否定现实身份；只分析这段关系的状态、质量、问题和趋势。\n'
     prompt += '\n'
     prompt += '# 输出\n'
     prompt += '【问题识别】简要说明本题问的是什么，不超过两行\n'
@@ -1998,7 +2383,8 @@ def generate_relationship_prompt(compound_result):
     prompt += '【大六壬】过程因果、起因-发展-结果链条\n'
     prompt += '【关系复合卦】双人关系场校验\n'
     prompt += '【综合验证】把各术数合在一起，说明哪些是主象、哪些是辅象、哪些是风险\n'
-    prompt += '【最终结论】最后再直接回答用户问题：主关系、当前状态、长期稳定性、趋势\n'
+    prompt += '【最终结论】最后再直接回答用户问题：主关系框架、关系动力、当前状态、长期稳定性、趋势\n'
+    prompt += '【信息缺口与追问】如果仍有歧义，列出需要补证的点和推荐追问卦问题\n'
     prompt += '【建议】给 3-5 条具体建议\n'
     return prompt
 def build_relationship_messages(

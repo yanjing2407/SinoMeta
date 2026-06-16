@@ -107,6 +107,12 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);border:1px s
         </div>
       </div>
       <div class="form-row">
+        <div class="form-group" style="flex:3;min-width:100%">
+          <label>补充事实 / 回答追问（可选）</label>
+          <textarea id="context" placeholder="例如：这是我和儿子；已经是夫妻；只是同事合作；最近断联；追问回答：主要是照护责任"></textarea>
+        </div>
+      </div>
+      <div class="form-row">
         <div class="form-group">
           <label>用户声明关系（可选）</label>
           <select id="relation_type">
@@ -272,6 +278,7 @@ function buildRequest(){
     const meihua=optionalPair('meihua_n1','meihua_n2','梅花数字');
     const req={
       event:$('event').value.trim(),
+      context:$('context').value.trim(),
       relation_type:$('relation_type').value,
       first_subject:subject('a'),
       second_subject:subject('b'),
@@ -301,6 +308,18 @@ function markFormDirty(){
   const btn=$('btnInterpret');
   if(btn)btn.textContent='需重新起盘后解读';
   if($('aiResult'))$('aiResult').innerHTML='表单已修改，请先重新起关系复合盘。';
+}
+function useFollowupQuestion(index){
+  const item=(window.relationshipFollowups||[])[index]||{};
+  const q=item['问题']||'';
+  if(!q)return;
+  const current=$('context').value.trim();
+  const addition=`追问：${q}\n回答：`;
+  $('context').value=current?`${current}\n\n${addition}`:addition;
+  refreshTime();
+  markFormDirty();
+  $('context').focus();
+  toast('已填入追问，请在补充事实中回答后重新起盘');
 }
 function sleep(ms){return new Promise(resolve=>setTimeout(resolve,ms))}
 async function readError(res){try{const d=await res.json();return d.detail||d.error||JSON.stringify(d)}catch(_){return await res.text()}}
@@ -383,24 +402,38 @@ function renderPair(pair,zw){
 }
 function renderMeta(meta){
   const task=meta['问题识别']||{},schedule=meta['权重调度']||{},layers=meta['任务语义汇总']||{},final=meta['综合断语']||{},user=meta['用户结论']||{};
+  const prior=meta['关系先验']||{};
   const top=user['最像关系']||{};
+  const framework=user['主框架']||{};
+  const motives=(user['动力']||[]).join('、')||'暂无明确动力';
   const notLike=(user['不像关系']||[]).join('、')||'暂无明显排除项';
   $('conclusionResult').innerHTML='<h3>直接结论</h3>'+kvHtml([
     ['一句话',user['一句话结论']||final['主关系定义']||''],
     ['直接回答',user['直接回答']||''],
+    ['主框架',`${framework['主框架']||''} ${framework['强度']??''}`],
+    ['关系动力',motives],
     ['最像关系',`${top['类型']||''} ${top['等级']||''}`],
     ['不像',notLike],
     ['当前状态',user['当前状态']||''],
     ['长期稳定',user['长期稳定性']||''],
     ['发展趋势',user['发展趋势']||'']
-  ]);
+  ])+`<div style="font-size:.82rem;color:var(--text-dim);margin-top:8px">${escapeHTML(framework['说明']||'')}</div>`;
   const ranking=(user['候选关系排行']||[]).map(x=>{
     const reason=(x['依据']||[]).join('；');
     return `<div style="margin-bottom:8px"><span class="tag gold">${escapeHTML(x['类型'])}</span><span class="tag">${escapeHTML(x['等级'])} ${escapeHTML(x['强度'])}</span><div style="font-size:.82rem;color:var(--text-dim)">${escapeHTML(reason)}</div></div>`;
   }).join('')||'<div class="tag">暂无排行</div>';
+  const gaps=(user['信息缺口']||[]).map(x=>`<div class="tag">${escapeHTML(x)}</div>`).join('')||'<span class="tag">暂无明显缺口</span>';
+  const followups=(user['推荐追问']||[]).map((x,i)=>`<div style="margin-bottom:8px"><button class="btn" style="padding:4px 8px;font-size:.78rem;margin-right:6px" onclick="useFollowupQuestion(${i})">追问</button><span class="tag gold">${escapeHTML(x['问题']||'')}</span><div style="font-size:.82rem;color:var(--text-dim)">${escapeHTML(x['用途']||'')}</div></div>`).join('')||'<div class="tag">暂无追问建议</div>';
+  window.relationshipFollowups=user['推荐追问']||[];
   const weights=(schedule['权重表']||[]).map(x=>`<span class="tag gold">${escapeHTML(x['术数'])} ${escapeHTML(x['权重'])}%</span>`).join('');
+  const priorNotes=(prior['说明']||[]).map(x=>`<div class="tag gold">${escapeHTML(x)}</div>`).join('')||'<span class="tag">暂无特殊先验</span>';
   const layerNames=['事实层','关系性质层','结构稳定层','动态行为层','趋势概率层','底层因果层'];
-  let html='<h3>候选关系排行</h3>'+ranking;
+  let html='<h3>关系先验</h3>'+priorNotes;
+  html+='<h3 style="margin-top:10px">信息缺口</h3>'+gaps;
+  html+='<h3 style="margin-top:10px">推荐追问卦</h3>'+followups;
+  html+='<details open><summary>关系候选与分类逼近</summary>';
+  html+='<h3 style="margin-top:10px">候选关系排行</h3>'+ranking;
+  html+='</details>';
   html+='<details><summary>问题识别、权重与分层标签</summary>';
   html+='<h3 style="margin-top:10px">问题识别</h3>'+kvHtml([
     ['任务类型',task['任务名称']||task['primary_task']||''],
@@ -516,7 +549,7 @@ function renderResults(data){
   $('resultArea').style.display='';
   $('interpretArea').style.display='';
   const st=data['时空坐标']||{},rel=data['关系识别盘']||{};
-  $('basicResult').innerHTML='<h3>基础信息</h3>'+kvHtml([['问题',data['问题']||''],['用户声明关系',data['用户声明关系']||''],['起卦时间',st['起卦时间']||''],['经纬度',`${st['经度']||''}, ${st['纬度']||''}`]]);
+  $('basicResult').innerHTML='<h3>基础信息</h3>'+kvHtml([['问题',data['问题']||''],['补充信息',data['补充信息']||''],['用户声明关系',data['用户声明关系']||''],['起卦时间',st['起卦时间']||''],['经纬度',`${st['经度']||''}, ${st['纬度']||''}`]]);
   $('relationResult').innerHTML='<h3>关系识别盘</h3>'+kvHtml([['关系描述',rel['关系描述']||rel['细粒度推断']||''],['保守层级',rel['保守层级']||''],['主要来源',rel['主要来源']||''],['一致性',rel['一致性']||'']]);
   renderMeta(data['元解释器']||{});
   renderChangeDiagnostics(data['排盘变化校验']||{});

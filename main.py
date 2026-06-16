@@ -107,6 +107,7 @@ class RelationshipSubject(BaseModel):
 
 class RelationshipRequest(BaseModel):
     event: str
+    context: str = ""
     year: int
     month: int
     day: int
