@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>关系复合盘</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0f0f1a;--bg2:#1a1a2e;--card:#1e1e32;--gold:#e2b969;--gold-dim:#a8863a;--red:#c0392b;--green:#88c999;--text:#f0e6d3;--text-dim:#a89b8c;--border:#3a3a52;--radius:8px}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Noto Serif SC',serif;background:var(--bg);color:var(--text);min-height:100vh;line-height:1.6}
+a{color:var(--gold);text-decoration:none}
+.header{text-align:center;padding:28px 16px 14px;border-bottom:1px solid var(--border);background:linear-gradient(180deg,#12121f,var(--bg))}
+.header h1{font-size:1.8rem;color:var(--gold);letter-spacing:.16em}
+.header p{color:var(--text-dim);font-size:.86rem;margin-top:2px}
+.nav{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin-top:12px}
+.nav a{border:1px solid var(--border);border-radius:18px;padding:5px 14px;font-size:.82rem;color:var(--text-dim)}
+.nav a.active,.nav a:hover{border-color:var(--gold);color:var(--gold);background:rgba(226,185,105,.08)}
+.container{max-width:1080px;margin:0 auto;padding:20px 14px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:16px;overflow:hidden}
+.card-title{padding:12px 16px;color:var(--gold);font-size:.98rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.card-body{padding:16px}
+.form-row{display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.form-group{flex:1;min-width:130px}
+.form-group label{display:block;font-size:.82rem;color:var(--text-dim);margin-bottom:3px}
+.form-group input,.form-group select,.form-group textarea{width:100%;padding:8px 10px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:inherit;font-size:.9rem}
+.form-group input:focus,.form-group select:focus,.form-group textarea:focus{outline:none;border-color:var(--gold)}
+.form-group textarea{resize:vertical;min-height:70px}
+.subject-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.panel{border:1px solid var(--border);border-radius:6px;background:var(--bg2);padding:12px}
+.panel-title{color:var(--gold);font-weight:700;font-size:.92rem;margin-bottom:10px}
+.section-label{font-size:.85rem;color:var(--text-dim);border-left:3px solid var(--gold-dim);padding-left:8px;margin:14px 0 8px}
+.btn-row{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
+.btn{padding:9px 20px;border:1px solid var(--gold-dim);border-radius:4px;background:transparent;color:var(--gold);font-family:inherit;font-size:.95rem;cursor:pointer;transition:all .2s}
+.btn:hover{background:var(--gold);color:var(--bg)}
+.btn-primary{background:var(--gold);color:var(--bg);font-weight:700}
+.btn-red{border-color:var(--red);color:#e88}
+.btn-red:hover{background:var(--red);color:#fff}
+.btn:disabled{opacity:.35;cursor:not-allowed}
+.role-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px}
+.role-card{border:1px solid var(--border);border-radius:6px;background:var(--bg2);padding:10px;text-align:left;cursor:pointer;color:var(--text);font-family:inherit;transition:all .2s;min-height:104px}
+.role-card.active{border-color:var(--gold);box-shadow:0 0 0 1px rgba(226,185,105,.25)}
+.role-card.disabled{opacity:.55}
+.role-card .name{color:var(--gold);font-weight:700}
+.role-card .meta,.role-card .specialty{font-size:.78rem;color:var(--text-dim);margin-top:5px}
+.mode-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--bg2)}
+.mode-row.disabled{opacity:.55}
+.toggle{display:flex;align-items:center;gap:8px;color:var(--gold);font-size:.86rem;white-space:nowrap;cursor:pointer}
+.toggle input{width:16px;height:16px;accent-color:var(--gold)}
+.result-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
+.mini{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px;font-size:.88rem}
+.mini h3{font-size:.95rem;color:var(--gold);margin-bottom:6px}
+.kv{display:grid;grid-template-columns:96px 1fr;gap:4px 8px;font-size:.86rem}
+.kv span:nth-child(odd){color:var(--text-dim)}
+.pillars{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+.pillar{text-align:center;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:7px 10px;min-width:58px}
+.pillar .pos{font-size:.72rem;color:var(--text-dim)}
+.pillar .gz{font-size:1.15rem;color:var(--gold);font-weight:700}
+.tag{display:inline-block;margin:2px 4px 2px 0;padding:2px 7px;border:1px solid var(--border);border-radius:12px;color:var(--text-dim);font-size:.78rem}
+.tag.gold{border-color:var(--gold-dim);color:var(--gold)}
+details{margin-top:10px}
+summary{cursor:pointer;color:var(--gold);font-size:.86rem}
+pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px;margin-top:8px;font-size:.78rem;color:var(--text-dim);max-height:360px;overflow:auto}
+.ai-result{background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:16px;min-height:70px;font-size:.92rem;line-height:1.8}
+.ai-result h1,.ai-result h2,.ai-result h3{margin:12px 0 6px;color:var(--gold)}
+.ai-result p{margin:6px 0}
+.ai-result ul,.ai-result ol{padding-left:20px;margin:6px 0}
+.ai-result strong{color:var(--gold)}
+.ai-result blockquote{border-left:3px solid var(--gold-dim);padding:6px 12px;color:var(--text-dim);margin:8px 0}
+.ai-result .error-box{border:1px solid #8f3434;background:rgba(192,57,43,.12);color:#ffd5d5;border-radius:6px;padding:10px 12px}
+.cursor{display:inline-block;width:2px;height:1em;background:var(--gold);animation:blink .8s step-end infinite;vertical-align:text-bottom}
+@keyframes blink{50%{opacity:0}}
+.toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--gold);color:var(--bg);padding:8px 24px;border-radius:20px;font-size:.9rem;opacity:0;transition:all .3s;z-index:999;pointer-events:none}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.footer{text-align:center;padding:18px;color:var(--text-dim);font-size:.75rem;border-top:1px solid var(--border);margin-top:32px}
+@media(max-width:720px){
+  .subject-grid{grid-template-columns:1fr}
+  .form-row{flex-direction:column}
+  .form-group{min-width:100%}
+  .header h1{font-size:1.35rem;letter-spacing:.08em}
+  .mode-row{align-items:flex-start;flex-direction:column}
+}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+</head>
+<body>
+<div class="header">
+  <h1>关系复合盘</h1>
+  <p>双人本命 · 关系画像 · 当前问事 · 复合卦</p>
+  <div class="nav">
+    <a href="/">单事起卦</a>
+    <a class="active" href="/relationship">关系复合盘</a>
+    <a href="/admin">管理后台</a>
+  </div>
+</div>
+
+<div class="container">
+  <div class="card">
+    <div class="card-title"><span>起关系复合盘</span></div>
+    <div class="card-body">
+      <div class="form-row">
+        <div class="form-group" style="flex:3;min-width:100%">
+          <label>所问问题</label>
+          <textarea id="event" placeholder="例如：算算两个命主什么关系；两人合作是否顺；父子关系能否恢复"></textarea>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>用户声明关系（可选）</label>
+          <select id="relation_type">
+            <option value="">自动识别</option>
+            <option value="亲子/血缘">亲子/血缘</option>
+            <option value="婚恋/姻缘">婚恋/姻缘</option>
+            <option value="夫妻">夫妻</option>
+            <option value="朋友/同辈">朋友/同辈</option>
+            <option value="合作/事业">合作/事业</option>
+            <option value="师徒/上下级">师徒/上下级</option>
+            <option value="纠纷/竞争">纠纷/竞争</option>
+            <option value="其他">其他</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="subject-grid">
+        <div class="panel">
+          <div class="panel-title">第一命主</div>
+          <div class="form-row">
+            <div class="form-group"><label>性别</label><select id="a_gender"><option value="男">男</option><option value="女">女</option></select></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>公历出生日期</label><input type="date" id="a_date"></div>
+            <div class="form-group"><label>具体出生时间</label><input type="time" id="a_time"></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">第二命主</div>
+          <div class="form-row">
+            <div class="form-group"><label>性别</label><select id="b_gender"><option value="男">男</option><option value="女">女</option></select></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>公历出生日期</label><input type="date" id="b_date"></div>
+            <div class="form-group"><label>具体出生时间</label><input type="time" id="b_time"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-label">起卦时间与地点</div>
+      <div class="form-row">
+        <div class="form-group"><label>日期</label><input type="date" id="q_date"></div>
+        <div class="form-group"><label>时间</label><input type="time" id="q_time"></div>
+        <div class="form-group" style="flex:0 0 auto;align-self:flex-end"><button class="btn" onclick="refreshTime()" style="padding:7px 12px;font-size:.82rem">此刻</button></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>起卦地点经度</label><input type="number" id="q_lng" step="0.000001" placeholder="自动定位或手动填写"></div>
+        <div class="form-group"><label>起卦地点纬度</label><input type="number" id="q_lat" step="0.000001" placeholder="自动定位或手动填写"></div>
+        <div class="form-group" style="flex:0 0 auto;align-self:flex-end"><button class="btn" onclick="initGeoLocation()" style="padding:7px 12px;font-size:.82rem">定位</button></div>
+      </div>
+
+      <div class="section-label">起卦参数（可选）</div>
+      <div class="form-row">
+        <div class="form-group"><label>六爻数字1</label><input type="number" id="liuyao_n1"></div>
+        <div class="form-group"><label>六爻数字2</label><input type="number" id="liuyao_n2"></div>
+        <div class="form-group"><label>梅花数字1</label><input type="number" id="meihua_n1"></div>
+        <div class="form-group"><label>梅花数字2</label><input type="number" id="meihua_n2"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>复合卦辅助数字</label><input id="compound_nums" placeholder="多个数字用逗号分隔"></div>
+        <div class="form-group"><label>方位角</label><input type="number" id="q_azimuth" step="1" min="0" max="360" placeholder="0-360"></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="btnDivine" onclick="doDivine()">起关系复合盘</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="resultArea" style="display:none">
+    <div class="card">
+      <div class="card-title"><span>排盘结果</span></div>
+      <div class="card-body">
+        <div class="result-grid">
+          <div class="mini" id="basicResult"></div>
+          <div class="mini" id="relationResult"></div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title"><span>两位命主个体盘</span></div>
+      <div class="card-body"><div class="result-grid"><div class="mini" id="firstResult"></div><div class="mini" id="secondResult"></div></div></div>
+    </div>
+    <div class="card">
+      <div class="card-title"><span>双人合盘与复合卦</span></div>
+      <div class="card-body"><div class="result-grid"><div class="mini" id="pairResult"></div><div class="mini" id="compoundResult"></div></div></div>
+    </div>
+    <div class="card">
+      <div class="card-title"><span>当前问事盘</span></div>
+      <div class="card-body"><div class="result-grid" id="currentResult"></div></div>
+    </div>
+    <div style="text-align:center;margin:16px 0">
+      <button class="btn" onclick="copyDivinationText()">复制排盘</button>
+      <button class="btn" onclick="exportDivinationText()">导出排盘</button>
+    </div>
+  </div>
+
+  <div id="interpretArea" style="display:none">
+    <div class="card">
+      <div class="card-title"><span>专家解读</span></div>
+      <div class="card-body">
+        <div class="role-grid" id="roleGrid"><div style="color:var(--text-dim);font-size:.85rem">正在加载角色...</div></div>
+        <div class="mode-row disabled" id="lenientModeRow">
+          <div style="font-size:.82rem;color:var(--text-dim)"><strong style="display:block;color:var(--text)">本地宽松模式</strong><span id="lenientModeHint">仅本地模型可用，减少合法内容误拒</span></div>
+          <label class="toggle"><input type="checkbox" id="lenientMode">启用</label>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" id="btnInterpret" onclick="doInterpret()">专家解读</button>
+          <button class="btn" onclick="copyInterpretText()">复制解读</button>
+          <button class="btn" onclick="exportInterpretText()">导出解读</button>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title"><span>解读结果</span></div>
+      <div class="card-body"><div class="ai-result" id="aiResult">等待解读。</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<div class="footer">关系复合盘 · 术数结论仅供参考，现实身份与重大决定以现实证据为准</div>
+
+<script>
+function $(id){return document.getElementById(id)}
+function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500)}
+function escapeHTML(text){return String(text??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}
+function renderMarkdown(text){if(window.marked&&window.DOMPurify){return DOMPurify.sanitize(marked.parse(text||''))}return escapeHTML(text||'').replace(/\n/g,'<br>')}
+function pad(n){return String(n).padStart(2,'0')}
+function refreshTime(){const d=new Date();$('q_date').value=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;$('q_time').value=`${pad(d.getHours())}:${pad(d.getMinutes())}`}
+function initGeoLocation(){
+  if(!navigator.geolocation){if(!$('q_lng').value)$('q_lng').value='120';if(!$('q_lat').value)$('q_lat').value='30';return}
+  navigator.geolocation.getCurrentPosition(pos=>{$('q_lng').value=pos.coords.longitude.toFixed(6);$('q_lat').value=pos.coords.latitude.toFixed(6)},()=>{if(!$('q_lng').value)$('q_lng').value='120';if(!$('q_lat').value)$('q_lat').value='30'},{timeout:6000})
+}
+function splitDate(id){const v=$(id).value;if(!v)throw new Error('请填写日期');const [y,m,d]=v.split('-').map(Number);return {y,m,d}}
+function splitTime(id){const v=$(id).value;if(!v)throw new Error('请填写时间');const [h,m]=v.split(':').map(Number);return {h,m}}
+function optionalPair(a,b,label){const x=$(a).value.trim(),y=$(b).value.trim();if(!x&&!y)return null;if(!x||!y)throw new Error(label+'需要同时填写两个数字');return [Number(x),Number(y)]}
+function parseNums(id){return $(id).value.split(',').map(x=>x.trim()).filter(Boolean).map(Number)}
+function subject(prefix){
+  const d=splitDate(prefix+'_date'),t=splitTime(prefix+'_time');
+  return {gender:$(prefix+'_gender').value,birth_year:d.y,birth_month:d.m,birth_day:d.d,birth_hour:t.h,birth_minute:t.m}
+}
+function buildRequest(){
+  try{
+    const qd=splitDate('q_date'),qt=splitTime('q_time');
+    const liuyao=optionalPair('liuyao_n1','liuyao_n2','六爻数字');
+    const meihua=optionalPair('meihua_n1','meihua_n2','梅花数字');
+    const req={
+      event:$('event').value.trim(),
+      relation_type:$('relation_type').value,
+      first_subject:subject('a'),
+      second_subject:subject('b'),
+      year:qd.y,month:qd.m,day:qd.d,hour:qt.h,minute:qt.m,
+      longitude:Number($('q_lng').value||120),
+      latitude:Number($('q_lat').value||30),
+      numbers:parseNums('compound_nums')
+    };
+    if(!req.event)throw new Error('请填写所问问题');
+    if(liuyao)req.liuyao_nums=liuyao;
+    if(meihua)req.meihua_nums=meihua;
+    if($('q_azimuth').value!=='')req.azimuth=Number($('q_azimuth').value);
+    return req;
+  }catch(e){toast(e.message);return null}
+}
+
+let lastRequest=null,lastResult=null,lastAiText='',roles=[],selectedRoleId=null;
+function sleep(ms){return new Promise(resolve=>setTimeout(resolve,ms))}
+async function readError(res){try{const d=await res.json();return d.detail||d.error||JSON.stringify(d)}catch(_){return await res.text()}}
+async function fetchJsonWithRetry(url,options={},retries=3){
+  let lastError;
+  for(let attempt=0;attempt<retries;attempt++){
+    const controller=new AbortController();
+    const timeout=setTimeout(()=>controller.abort(),options.timeout||9000);
+    try{
+      const res=await fetch(url,{...options,signal:controller.signal});
+      if(!res.ok)throw new Error(await readError(res));
+      return await res.json();
+    }catch(e){lastError=e;if(attempt<retries-1)await sleep(350*(attempt+1))}
+    finally{clearTimeout(timeout)}
+  }
+  throw lastError;
+}
+async function apiPostJson(url,body){
+  const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!res.ok)throw new Error(await readError(res));
+  return await res.json();
+}
+async function loadRoles(showLoading=true){
+  if(showLoading)$('roleGrid').innerHTML='<div style="color:var(--text-dim);font-size:.85rem">正在加载角色...</div>';
+  try{
+    const data=await fetchJsonWithRetry('/api/roles',{},4);
+    roles=data.roles||[];
+    selectedRoleId=(roles.find(r=>r.is_default)||roles[0]||{}).id||null;
+    renderRoles();
+  }catch(e){
+    $('roleGrid').innerHTML=`<div style="color:#e88;font-size:.85rem">角色加载失败 <button class="btn" style="margin-left:8px;padding:4px 10px;font-size:.78rem" onclick="loadRoles()">重试</button></div>`;
+    updateLenientMode();
+  }
+}
+function renderRoles(){
+  if(!roles.length){$('roleGrid').innerHTML='<div style="color:var(--text-dim);font-size:.85rem">暂无可用角色，请先到后台配置</div>';updateLenientMode();return}
+  $('roleGrid').innerHTML=roles.map(r=>{
+    const cls=['role-card'];
+    if(r.id===selectedRoleId)cls.push('active');
+    if(!r.is_configured)cls.push('disabled');
+    return `<button class="${cls.join(' ')}" onclick="selectRole(${r.id})" ${r.is_configured?'':'disabled'}>
+      <div class="name">${escapeHTML(r.name)}</div>
+      <div class="specialty">${escapeHTML(r.specialty||'')}</div>
+      <div class="meta">${escapeHTML(r.provider_name||'')} · ${escapeHTML(r.model||'')}${r.is_local?' · 本地':''}</div>
+    </button>`;
+  }).join('');
+  updateLenientMode();
+}
+function selectRole(id){selectedRoleId=id;renderRoles()}
+function selectedRole(){return roles.find(r=>r.id===selectedRoleId)||null}
+function updateLenientMode(){
+  const r=selectedRole(),enabled=!!(r&&r.is_local);
+  $('lenientModeRow').classList.toggle('disabled',!enabled);
+  $('lenientMode').disabled=!enabled;
+  if(!enabled)$('lenientMode').checked=false;
+  $('lenientModeHint').textContent=enabled?'当前角色为本地模型，可启用':'仅本地模型可用';
+}
+
+function kvHtml(rows){return `<div class="kv">${rows.map(([k,v])=>`<span>${escapeHTML(k)}</span><span>${escapeHTML(v)}</span>`).join('')}</div>`}
+function pillarsHtml(bazi){
+  const p=bazi?.['四柱']||{};
+  return `<div class="pillars">${['年柱','月柱','日柱','时柱'].map(pos=>`<div class="pillar"><div class="pos">${pos}</div><div class="gz">${escapeHTML(p[pos]||'')}</div></div>`).join('')}</div>`;
+}
+function renderSubject(data,title){
+  const bazi=data['八字']||{},zw=data['紫微斗数']||{};
+  let html=`<h3>${title}</h3>`;
+  html+=kvHtml([['性别',data['性别']||''],['出生时间',data['出生时间']||''],['真太阳时',bazi['真太阳时']||'']]);
+  html+=pillarsHtml(bazi);
+  html+=kvHtml([['日主',`${bazi['日主五行']||''}${bazi['日主阴阳']||''}`],['强弱',bazi['日主强弱']?.['判断']||''],['紫微命宫',zw['命宫']||''],['紫微身宫',zw['身宫']||''],['五行局',zw['五行局']||'']]);
+  return html;
+}
+function renderPair(pair,zw){
+  let html='<h3>八字合盘</h3>';
+  html+=kvHtml([['关系张力',`${pair['关系张力等级']||''} ${pair['关系张力评分']||''}`],['日主关系',pair['日主关系']?.['五行关系']||''],['A看B',pair['日主关系']?.['第二命主对第一命主十神']||''],['B看A',pair['日主关系']?.['第一命主对第二命主十神']||'']]);
+  html+=(pair['五行互补']||[]).map(x=>`<span class="tag gold">${escapeHTML(x)}</span>`).join('');
+  html+='<h3 style="margin-top:10px">紫微合盘</h3>';
+  html+=kvHtml([['紫微评分',`${zw['紫微合盘等级']||''} ${zw['紫微合盘评分']||''}`]]);
+  html+=(zw['紫微互动线索']||[]).map(x=>`<div class="tag">${escapeHTML(x)}</div>`).join('');
+  return html;
+}
+function renderCurrent(cur){
+  const dlr=cur['大六壬']||{};
+  const rows=[
+    ['六爻',cur['六爻']?`${cur['六爻']['卦名']||''} · ${cur['六爻']['宫属']||''}`:''],
+    ['奇门',cur['奇门遁甲']?`${cur['奇门遁甲']['遁型']||''}${cur['奇门遁甲']['局数']||''}局 · 值符${cur['奇门遁甲']['值符星']||''} · 值使${cur['奇门遁甲']['值使门']||''}`:''],
+    ['梅花',cur['梅花易数']?`${cur['梅花易数']['本卦']?.['卦名']||''} 变 ${cur['梅花易数']['变卦']?.['卦名']||''} · 动${cur['梅花易数']['动爻']||''}爻`:''],
+    ['大六壬A',dlr['第一命主行年盘']?`${dlr['第一命主行年盘']['三传']?.['起传法']||''} · 行年${dlr['第一命主行年盘']['行年']||''}`:''],
+    ['大六壬B',dlr['第二命主行年盘']?`${dlr['第二命主行年盘']['三传']?.['起传法']||''} · 行年${dlr['第二命主行年盘']['行年']||''}`:'']
+  ];
+  $('currentResult').innerHTML=rows.map(([k,v])=>`<div class="mini"><h3>${escapeHTML(k)}</h3><div>${escapeHTML(v)}</div></div>`).join('');
+}
+function renderResults(data){
+  $('resultArea').style.display='';
+  $('interpretArea').style.display='';
+  const st=data['时空坐标']||{},rel=data['关系识别盘']||{};
+  $('basicResult').innerHTML='<h3>基础信息</h3>'+kvHtml([['问题',data['问题']||''],['用户声明关系',data['用户声明关系']||''],['起卦时间',st['起卦时间']||''],['经纬度',`${st['经度']||''}, ${st['纬度']||''}`]]);
+  $('relationResult').innerHTML='<h3>关系识别盘</h3>'+kvHtml([['关系描述',rel['关系描述']||rel['细粒度推断']||''],['保守层级',rel['保守层级']||''],['主要来源',rel['主要来源']||''],['一致性',rel['一致性']||'']]);
+  $('firstResult').innerHTML=renderSubject(data['第一命主']||{},'第一命主');
+  $('secondResult').innerHTML=renderSubject(data['第二命主']||{},'第二命主');
+  const pair=data['双人本命合盘']||{};
+  $('pairResult').innerHTML=renderPair(pair['八字合盘']||{},pair['紫微合盘']||{});
+  const cg=data['关系复合卦']||{};
+  $('compoundResult').innerHTML='<h3>关系复合卦</h3>'+kvHtml([['本卦',`${cg['本卦']?.['卦名']||''}（${cg['本卦']?.['上卦']||''}/${cg['本卦']?.['下卦']||''}）`],['互卦',cg['互卦']?.['卦名']||''],['变卦',cg['变卦']?.['卦名']||''],['动爻',cg['动爻']||''],['体用',`${cg['体用分析']?.['体用关系']||''} · ${cg['体用分析']?.['断语']||''}`]])+`<details><summary>完整排盘 JSON</summary><pre>${escapeHTML(JSON.stringify(data,null,2))}</pre></details>`;
+  renderCurrent(data['当前问事盘']||{});
+  $('aiResult').innerHTML='等待解读。';
+  lastAiText='';
+  $('resultArea').scrollIntoView({behavior:'smooth'});
+}
+async function doDivine(){
+  const req=buildRequest();if(!req)return;
+  lastRequest=req;
+  const btn=$('btnDivine');btn.disabled=true;btn.textContent='起盘中...';
+  try{
+    const data=await apiPostJson('/api/relationship/divine',req);
+    lastResult=data;
+    renderResults(data);
+  }catch(e){toast('起盘失败：'+e.message)}
+  finally{btn.disabled=false;btn.textContent='起关系复合盘'}
+}
+async function streamSSE(url,body,el){
+  const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!res.ok)throw new Error(await readError(res));
+  const reader=res.body.getReader();
+  const decoder=new TextDecoder('utf-8');
+  let buffer='',text='';
+  el.innerHTML='<span class="cursor"></span>';
+  while(true){
+    const {value,done}=await reader.read();
+    if(done)break;
+    buffer+=decoder.decode(value,{stream:true});
+    const parts=buffer.split('\n\n');
+    buffer=parts.pop();
+    for(const part of parts){
+      const line=part.split('\n').find(x=>x.startsWith('data:'));
+      if(!line)continue;
+      const data=JSON.parse(line.slice(5).trim());
+      if(data.error)throw new Error(`[${data.trace_id||''}] ${data.error}`);
+      if(data.token){text+=data.token;lastAiText=text;el.innerHTML=renderMarkdown(text)+'<span class="cursor"></span>'}
+      if(data.done){el.innerHTML=renderMarkdown(text);return}
+    }
+  }
+  el.innerHTML=renderMarkdown(text);
+}
+async function doInterpret(){
+  if(!lastRequest){toast('请先起盘');return}
+  if(!selectedRoleId){toast('请先选择角色');return}
+  const btn=$('btnInterpret');btn.disabled=true;btn.textContent='解读中...';
+  try{
+    const body={...lastRequest,role_id:selectedRoleId,lenient_mode:!!$('lenientMode').checked};
+    await streamSSE('/api/relationship/interpret',body,$('aiResult'));
+  }catch(e){$('aiResult').innerHTML=`<div class="error-box">AI 请求失败<br>${escapeHTML(e.message)}</div>`;toast('解读失败')}
+  finally{btn.disabled=false;btn.textContent='专家解读'}
+}
+function buildDivinationText(){return lastResult?`==================== 关系复合盘 ====================\n${JSON.stringify(lastResult,null,2)}\n==================================================\n`:''}
+function downloadText(text,filename){const blob=new Blob([text],{type:'text/plain;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url)}
+async function copyText(text,msg){if(!text){toast('暂无内容');return}try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text)}else{const ta=document.createElement('textarea');ta.value=text;ta.style.position='fixed';ta.style.left='-9999px';document.body.appendChild(ta);ta.focus();ta.select();document.execCommand('copy');document.body.removeChild(ta)}toast(msg)}catch(e){toast('复制失败，请手动选择文本')}}
+function copyDivinationText(){copyText(buildDivinationText(),'已复制排盘')}
+function exportDivinationText(){if(!lastResult){toast('暂无排盘');return}downloadText(buildDivinationText(),`关系复合盘_${new Date().toISOString().slice(0,10)}.txt`);toast('已导出排盘')}
+function copyInterpretText(){copyText(lastAiText,'已复制解读')}
+function exportInterpretText(){if(!lastAiText){toast('暂无解读');return}downloadText(lastAiText,`关系复合盘解读_${new Date().toISOString().slice(0,10)}.txt`);toast('已导出解读')}
+
+window.addEventListener('DOMContentLoaded',()=>{
+  refreshTime();
+  loadRoles();
+  initGeoLocation();
+});
+</script>
+</body>
+</html>

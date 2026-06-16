@@ -34,6 +34,7 @@ from llm_store import (
     save_provider,
     save_role,
 )
+from relationship import relationship_divination, stream_relationship_interpret
 
 STATIC_DIR = Path(__file__).parent / "static"
 LOG_PATH = Path(os.getenv("SINOMETA_LOG_PATH", Path(__file__).parent / "data" / "sinometa.log"))
@@ -93,6 +94,38 @@ class InterpretRequest(DivineRequest):
     lenient_mode: bool = False
     mode: str = 'concise'  # 'concise' 或 'expert'
     subject_status: Optional[str] = None  # 'living'(在世) / 'historical'(历史命例) / 'pattern_only'(仅看格局) / auto(自动判断)
+
+
+class RelationshipSubject(BaseModel):
+    gender: str
+    birth_year: int
+    birth_month: int
+    birth_day: int
+    birth_hour: int
+    birth_minute: int = 0
+
+
+class RelationshipRequest(BaseModel):
+    event: str
+    year: int
+    month: int
+    day: int
+    hour: int
+    minute: int = 0
+    longitude: float = 120.0
+    latitude: float = 30.0
+    relation_type: str = ""
+    first_subject: RelationshipSubject
+    second_subject: RelationshipSubject
+    liuyao_nums: Optional[list] = None
+    meihua_nums: Optional[list] = None
+    numbers: Optional[list] = None
+    azimuth: Optional[float] = None
+
+
+class RelationshipInterpretRequest(RelationshipRequest):
+    role_id: Optional[int] = None
+    lenient_mode: bool = False
 
 
 class ProviderPayload(BaseModel):
@@ -236,6 +269,11 @@ async def admin_page():
     return FileResponse(STATIC_DIR / "admin.html")
 
 
+@app.get("/relationship")
+async def relationship_page():
+    return FileResponse(STATIC_DIR / "relationship.html")
+
+
 # ==================== API 路由 ====================
 
 @app.post("/api/divine")
@@ -243,6 +281,55 @@ async def divine(req: DivineRequest):
     """起盘接口"""
     result = do_multi_divination(req)
     return make_serializable(result)
+
+
+@app.post("/api/relationship/divine")
+async def relationship_divine(req: RelationshipRequest):
+    """关系复合盘起盘接口"""
+    try:
+        result = relationship_divination(req.model_dump())
+        return make_serializable(result)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/relationship/interpret")
+async def relationship_interpret(req: RelationshipInterpretRequest):
+    """关系复合盘解读接口（SSE流式）"""
+    role = resolve_active_role(req.role_id)
+    lenient_mode = bool(req.lenient_mode and _looks_local_base_url(role.get("base_url", "")))
+    result = relationship_divination(req.model_dump())
+    trace_id = uuid.uuid4().hex[:8]
+
+    def event_stream():
+        logger.info(
+            "LLM stream start trace=%s endpoint=relationship role=%s provider=%s type=%s model=%s base_url=%s lenient=%s",
+            trace_id,
+            role.get("role_name"),
+            role.get("provider_name"),
+            role.get("provider_type"),
+            role.get("model"),
+            role.get("base_url"),
+            lenient_mode,
+        )
+        try:
+            for token in stream_relationship_interpret(
+                result,
+                api_key=role["api_key"],
+                base_url=role["base_url"],
+                model=role["model"],
+                system_prompt=role["system_prompt"],
+                provider_type=role["provider_type"],
+                lenient_mode=lenient_mode,
+            ):
+                yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
+            logger.info("LLM stream done trace=%s endpoint=relationship", trace_id)
+            yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            logger.exception("LLM stream failed trace=%s endpoint=relationship", trace_id)
+            yield f"data: {json.dumps({'error': str(e), 'trace_id': trace_id}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @app.get("/api/roles")

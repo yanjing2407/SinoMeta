@@ -202,6 +202,70 @@ def test_frontend_copy_divination_without_event():
     print("PASS: test_frontend_copy_divination_without_event")
 
 
+def test_frontend_result_area_visible_by_default():
+    from pathlib import Path
+
+    index_html = Path("static/index.html").read_text(encoding="utf-8")
+    assert '<div id="resultArea">' in index_html
+    assert '<div id="resultArea" style="display:none">' not in index_html
+    assert "等待起卦。" in index_html
+    print("PASS: test_frontend_result_area_visible_by_default")
+
+
+def test_relationship_page_and_routes_present():
+    from pathlib import Path
+
+    main_py = Path("main.py").read_text(encoding="utf-8")
+    relationship_html = Path("static/relationship.html").read_text(encoding="utf-8")
+    index_html = Path("static/index.html").read_text(encoding="utf-8")
+
+    assert '@app.get("/relationship")' in main_py
+    assert '@app.post("/api/relationship/divine")' in main_py
+    assert '@app.post("/api/relationship/interpret")' in main_py
+    assert "关系复合盘" in relationship_html
+    assert "copyDivinationText" in relationship_html
+    assert 'href="/relationship"' in index_html
+    print("PASS: test_relationship_page_and_routes_present")
+
+
+def test_relationship_divination_weak_description():
+    from relationship import relationship_divination
+
+    payload = {
+        "event": "算算两个命主什么关系",
+        "relation_type": "",
+        "first_subject": {
+            "gender": "男",
+            "birth_year": 1982,
+            "birth_month": 11,
+            "birth_day": 12,
+            "birth_hour": 13,
+            "birth_minute": 15,
+        },
+        "second_subject": {
+            "gender": "女",
+            "birth_year": 1984,
+            "birth_month": 8,
+            "birth_day": 15,
+            "birth_hour": 1,
+            "birth_minute": 0,
+        },
+        "year": 2026,
+        "month": 6,
+        "day": 16,
+        "hour": 6,
+        "minute": 54,
+        "longitude": 118.024093,
+        "latitude": 36.814259,
+    }
+    result = relationship_divination(payload)
+    relation = result["关系识别盘"]
+    assert "关系描述" in relation
+    assert "不作现实身份断言" in relation["一致性"]
+    assert relation["盘面识别倾向"]["保守层级"] == "关系画像描述，不作现实身份断言"
+    print("PASS: test_relationship_divination_weak_description")
+
+
 def test_sqlite_busy_timeout():
     from llm_store import _connect
 

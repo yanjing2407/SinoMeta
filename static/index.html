@@ -15,6 +15,9 @@ a{color:var(--gold)}
 .header{text-align:center;padding:28px 16px 14px;border-bottom:1px solid var(--border);background:linear-gradient(180deg,#12121f,var(--bg))}
 .header h1{font-size:1.9rem;color:var(--gold);letter-spacing:.3em}
 .header p{color:var(--text-dim);font-size:.85rem;margin-top:2px}
+.nav{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin-top:12px}
+.nav a{border:1px solid var(--border);border-radius:18px;padding:5px 14px;font-size:.82rem;color:var(--text-dim);text-decoration:none}
+.nav a:hover{border-color:var(--gold);color:var(--gold);background:rgba(226,185,105,.08)}
 
 .container{max-width:900px;margin:0 auto;padding:20px 14px}
 
@@ -135,6 +138,10 @@ a{color:var(--gold)}
 <div class="header">
   <h1>术数预测</h1>
   <p>八字 · 奇门遁甲 · 六爻 · 梅花易数 — AI 综合解读</p>
+  <div class="nav">
+    <a href="/relationship">关系复合盘</a>
+    <a href="/admin">管理后台</a>
+  </div>
 </div>
 
 <div class="container">
@@ -202,30 +209,30 @@ a{color:var(--gold)}
   </div>
 
   <!-- Results -->
-  <div id="resultArea" style="display:none">
-    <div class="card" id="baziCard" style="display:none">
+  <div id="resultArea">
+    <div class="card" id="baziCard">
       <div class="card-title" onclick="toggleCard(this)"><span>四柱八字</span><span class="arrow">▼</span></div>
-      <div class="card-body" id="baziResult"></div>
+      <div class="card-body" id="baziResult"><div style="color:var(--text-dim);font-size:.86rem">等待起卦。</div></div>
     </div>
-    <div class="card" id="ziweiCard" style="display:none">
+    <div class="card" id="ziweiCard">
       <div class="card-title" onclick="toggleCard(this)"><span>紫微斗数</span><span class="arrow">▼</span></div>
-      <div class="card-body" id="ziweiResult"></div>
+      <div class="card-body" id="ziweiResult"><div style="color:var(--text-dim);font-size:.86rem">等待起卦。</div></div>
     </div>
-    <div class="card" id="daliurenCard" style="display:none">
+    <div class="card" id="daliurenCard">
       <div class="card-title" onclick="toggleCard(this)"><span>大六壬</span><span class="arrow">▼</span></div>
-      <div class="card-body" id="daliurenResult"></div>
+      <div class="card-body" id="daliurenResult"><div style="color:var(--text-dim);font-size:.86rem">等待起卦。</div></div>
     </div>
-    <div class="card" id="qimenCard" style="display:none">
+    <div class="card" id="qimenCard">
       <div class="card-title" onclick="toggleCard(this)"><span>奇门遁甲</span><span class="arrow">▼</span></div>
-      <div class="card-body" id="qimenResult"></div>
+      <div class="card-body" id="qimenResult"><div style="color:var(--text-dim);font-size:.86rem">等待起卦。</div></div>
     </div>
-    <div class="card" id="liuyaoCard" style="display:none">
+    <div class="card" id="liuyaoCard">
       <div class="card-title" onclick="toggleCard(this)"><span>六爻</span><span class="arrow">▼</span></div>
-      <div class="card-body" id="liuyaoResult"></div>
+      <div class="card-body" id="liuyaoResult"><div style="color:var(--text-dim);font-size:.86rem">等待起卦。</div></div>
     </div>
-    <div class="card" id="meihuaCard" style="display:none">
+    <div class="card" id="meihuaCard">
       <div class="card-title" onclick="toggleCard(this)"><span>梅花易数</span><span class="arrow">▼</span></div>
-      <div class="card-body" id="meihuaResult"></div>
+      <div class="card-body" id="meihuaResult"><div style="color:var(--text-dim);font-size:.86rem">等待起卦。</div></div>
     </div>
 
     <div style="text-align:center;margin:16px 0">
