@@ -263,7 +263,78 @@ def test_relationship_divination_weak_description():
     assert "关系描述" in relation
     assert "不作现实身份断言" in relation["一致性"]
     assert relation["盘面识别倾向"]["保守层级"] == "关系画像描述，不作现实身份断言"
+    raw = result["原始盘要点"]
+    assert raw["六爻"]["卦名"]
+    assert raw["六爻"]["世爻"]
+    assert raw["六爻"]["应爻"]
+    assert raw["八字合盘"]["四柱对照"]
+    meta = result["元解释器"]
+    assert meta["问题识别"]["domain"] == "relationship"
+    assert meta["权重调度"]["权重表"]
+    assert any(row["术数"] == "关系复合卦" for row in meta["权重调度"]["权重表"])
+    assert "用户结论" in meta
+    assert meta["用户结论"]["一句话结论"]
+    assert meta["用户结论"]["候选关系排行"]
+    assert "事实层" in meta["任务语义汇总"]
+    assert "综合断语" in meta
+    assert "不直接断言夫妻" in meta["综合断语"]["身份边界"]
+    change = result["排盘变化校验"]
+    assert change["请求指纹"]
+    assert change["第二命主"]["四柱"]
+    assert change["随命主变化"]["关系复合卦"]["本卦"]
+    assert change["随起卦变化"]["六爻"]
     print("PASS: test_relationship_divination_weak_description")
+
+
+def test_relationship_second_subject_change_diagnostics():
+    from copy import deepcopy
+
+    from relationship import relationship_divination
+
+    payload = {
+        "event": "算算两个命主什么关系",
+        "relation_type": "",
+        "first_subject": {
+            "gender": "男",
+            "birth_year": 1982,
+            "birth_month": 11,
+            "birth_day": 12,
+            "birth_hour": 13,
+            "birth_minute": 15,
+        },
+        "second_subject": {
+            "gender": "女",
+            "birth_year": 1984,
+            "birth_month": 8,
+            "birth_day": 15,
+            "birth_hour": 1,
+            "birth_minute": 0,
+        },
+        "year": 2026,
+        "month": 6,
+        "day": 16,
+        "hour": 6,
+        "minute": 54,
+        "longitude": 118.024093,
+        "latitude": 36.814259,
+    }
+    changed = deepcopy(payload)
+    changed["second_subject"].update({
+        "birth_year": 1986,
+        "birth_month": 3,
+        "birth_day": 21,
+        "birth_hour": 9,
+        "birth_minute": 30,
+    })
+
+    first = relationship_divination(payload)
+    second = relationship_divination(changed)
+
+    assert first["排盘变化校验"]["请求指纹"] != second["排盘变化校验"]["请求指纹"]
+    assert first["排盘变化校验"]["第二命主"]["四柱"] != second["排盘变化校验"]["第二命主"]["四柱"]
+    assert first["排盘变化校验"]["随命主变化"]["关系复合卦"]["第二命主数"] != second["排盘变化校验"]["随命主变化"]["关系复合卦"]["第二命主数"]
+    assert first["当前问事盘"]["六爻"]["卦名"] == second["当前问事盘"]["六爻"]["卦名"]
+    print("PASS: test_relationship_second_subject_change_diagnostics")
 
 
 def test_sqlite_busy_timeout():
@@ -759,6 +830,9 @@ if __name__ == '__main__':
     test_admin_provider_renderer_uses_provider_var()
     test_frontend_initial_load_retries()
     test_frontend_copy_divination_without_event()
+    test_relationship_page_and_routes_present()
+    test_relationship_divination_weak_description()
+    test_relationship_second_subject_change_diagnostics()
     test_sqlite_busy_timeout()
     test_jie_qi_month()
     test_true_solar_time()

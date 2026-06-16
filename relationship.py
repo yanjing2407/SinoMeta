@@ -7,6 +7,7 @@ weak-description policy: when the user has not declared the real relation, it
 describes relationship signals instead of asserting a social/legal identity.
 """
 
+import hashlib
 import json
 import logging
 from datetime import datetime
@@ -70,6 +71,132 @@ HIGH_RISK_KEYWORDS = {
     "法律纠纷": ["官司", "诉讼", "犯罪", "坐牢", "判刑", "报警"],
     "投资财务": ["投资", "借钱", "贷款", "破产", "债务"],
 }
+RELATION_TASK_PROFILES = {
+    "relationship_identity": {
+        "名称": "关系身份/事实类",
+        "说明": "用户在问两人是否已经形成某种现实关系或事实状态。",
+        "语义主轴": ["事实", "状态", "边界"],
+        "time_axis": "present",
+        "uncertainty": "medium",
+        "weights": {"六爻": 34, "奇门": 18, "大六壬": 18, "八字": 10, "紫微": 10, "关系复合卦": 10, "梅花": 0},
+    },
+    "relationship_definition": {
+        "名称": "关系定义类",
+        "说明": "用户在问两人的关系性质，需要把多源信息压缩成关系画像。",
+        "语义主轴": ["性质", "状态", "结构"],
+        "time_axis": "present",
+        "uncertainty": "medium",
+        "weights": {"紫微": 22, "八字": 20, "六爻": 20, "奇门": 13, "关系复合卦": 12, "梅花": 8, "大六壬": 5},
+    },
+    "relationship_state": {
+        "名称": "当前状态类",
+        "说明": "用户在问现在关系如何、对方态度或当前互动状态。",
+        "语义主轴": ["状态", "行为", "趋势"],
+        "time_axis": "present",
+        "uncertainty": "medium",
+        "weights": {"奇门": 28, "六爻": 24, "大六壬": 22, "梅花": 10, "关系复合卦": 6, "紫微": 5, "八字": 5},
+    },
+    "relationship_future": {
+        "名称": "发展趋势类",
+        "说明": "用户在问未来能否发展、复合、结婚或关系走向。",
+        "语义主轴": ["趋势", "状态", "结构"],
+        "time_axis": "future",
+        "uncertainty": "high",
+        "weights": {"梅花": 26, "奇门": 22, "六爻": 18, "大六壬": 14, "关系复合卦": 10, "紫微": 5, "八字": 5},
+    },
+    "relationship_timing": {
+        "名称": "时间应期类",
+        "说明": "用户在问何时发生、何时复合、何时出现结果。",
+        "语义主轴": ["时间", "趋势", "状态"],
+        "time_axis": "future",
+        "uncertainty": "high",
+        "weights": {"大六壬": 28, "奇门": 23, "六爻": 23, "梅花": 10, "关系复合卦": 6, "八字": 5, "紫微": 5},
+    },
+    "relationship_cause": {
+        "名称": "因果解释类",
+        "说明": "用户在问为什么会这样、为什么反复、问题根源在哪里。",
+        "语义主轴": ["因果", "结构", "过程"],
+        "time_axis": "past_to_present",
+        "uncertainty": "medium",
+        "weights": {"大六壬": 26, "八字": 22, "紫微": 18, "关系复合卦": 12, "奇门": 10, "六爻": 8, "梅花": 4},
+    },
+}
+
+
+def _has_any(text: str, words: List[str]) -> bool:
+    lowered = text.lower()
+    return any(word in text or word.lower() in lowered for word in words)
+
+
+def _classify_relationship_task(question: str, declared_relation: str) -> Dict[str, Any]:
+    text = question or ""
+    evidence = []
+    primary = "relationship_definition"
+
+    if _has_any(text, ["什么时候", "何时", "多久", "哪年", "哪月", "哪天", "几时", "应期"]):
+        primary = "relationship_timing"
+        evidence.append("问题包含时间/应期词")
+    elif _has_any(text, ["为什么", "为何", "原因", "根源", "怎么会", "总是", "反复", "分分合合"]):
+        primary = "relationship_cause"
+        evidence.append("问题包含因果解释词")
+    elif _has_any(text, ["会不会", "能不能", "能否", "是否会", "未来", "以后", "发展", "复合", "结婚", "在一起", "走下去"]):
+        primary = "relationship_future"
+        evidence.append("问题包含未来/发展趋势词")
+    elif _has_any(text, ["现在", "目前", "当下", "态度", "想法", "感觉", "怎么样", "如何", "还爱", "在想"]):
+        primary = "relationship_state"
+        evidence.append("问题包含当前状态或心理状态词")
+    elif _has_any(text, ["是不是", "是否", "有没有", "夫妻", "情侣", "情人", "亲子", "父子", "母女", "合作", "同事", "朋友"]):
+        primary = "relationship_identity"
+        evidence.append("问题包含身份/事实判断词")
+    elif _has_any(text, ["什么关系", "关系是什么", "算算关系", "关系性质"]):
+        primary = "relationship_definition"
+        evidence.append("问题包含开放关系定义词")
+    else:
+        evidence.append("未命中特定关系子类，按开放关系定义处理")
+
+    profile = RELATION_TASK_PROFILES[primary]
+    declared = _declared_relation_text(declared_relation)
+    if declared != "未提供":
+        evidence.append("用户已声明现实关系，系统把声明作为解读前提")
+
+    return {
+        "domain": "relationship",
+        "primary_task": primary,
+        "任务名称": profile["名称"],
+        "任务说明": profile["说明"],
+        "语义主轴": profile["语义主轴"],
+        "time_axis": profile["time_axis"],
+        "object_type": "human_relation",
+        "uncertainty": profile["uncertainty"],
+        "识别依据": evidence,
+        "现实边界": "关系复合盘只分析两人互动、结构与趋势；未声明关系时不作现实身份、法律身份或血缘事实证明。",
+    }
+
+
+def _relationship_weights_for_task(primary_task: str) -> Dict[str, int]:
+    profile = RELATION_TASK_PROFILES.get(primary_task) or RELATION_TASK_PROFILES["relationship_definition"]
+    return dict(profile["weights"])
+
+
+def _weight_rows(weights: Dict[str, int]) -> List[Dict[str, Any]]:
+    return [
+        {"术数": method, "权重": weight, "说明": _method_role_description(method)}
+        for method, weight in sorted(weights.items(), key=lambda kv: kv[1], reverse=True)
+    ]
+
+
+def _method_role_description(method: str) -> str:
+    return {
+        "六爻": "当前事件与事实状态",
+        "奇门": "行为路径、主动被动与环境阻力",
+        "梅花": "趋势概率与象意补充",
+        "大六壬": "过程因果、行为轨迹与后续演化",
+        "八字": "长期结构、互补与冲合刑害",
+        "紫微": "人生结构、宫位牵动与感情模式",
+        "关系复合卦": "双人关系场、对象差异与关系气质校验",
+    }.get(method, "")
+
+
 
 
 def _as_int(value: Any, label: str) -> int:
@@ -426,11 +553,933 @@ def _current_relation_signals(current_question: Optional[Dict[str, Any]]) -> Tup
     return scores, evidence, strong_identity_anchors
 
 
+def _ziwei_relation_signals(ziwei_pair: Optional[Dict[str, Any]]) -> Tuple[Dict[str, int], List[str], int]:
+    scores = {"亲密": 0, "同辈": 0, "照护": 0, "合作": 0, "冲突": 0, "亲缘": 0}
+    evidence: List[str] = []
+    anchors = 0
+    if not ziwei_pair or ziwei_pair.get("错误"):
+        return scores, evidence, anchors
+
+    score = int(ziwei_pair.get("紫微合盘评分", 50))
+    if score >= 70:
+        scores["亲密"] += 4
+        scores["合作"] += 2
+        evidence.append(f"紫微合盘评分{score}，人生结构互动较强")
+    elif score < 50:
+        scores["冲突"] += 3
+        evidence.append(f"紫微合盘评分{score}，结构支撑偏弱")
+
+    for line in ziwei_pair.get("紫微互动线索", []):
+        text = str(line)
+        if "夫妻宫" in text:
+            scores["亲密"] += 4
+            anchors += 1
+            evidence.append(f"紫微见夫妻宫牵动：{text}")
+        elif "子女宫" in text:
+            scores["照护"] += 3
+            scores["亲缘"] += 1
+            evidence.append(f"紫微见子女宫牵动：{text}")
+        elif "父母宫" in text:
+            scores["照护"] += 3
+            scores["亲缘"] += 2
+            evidence.append(f"紫微见父母宫牵动：{text}")
+        elif "相冲" in text:
+            scores["冲突"] += 3
+            evidence.append(f"紫微见宫位冲突：{text}")
+
+    return scores, evidence[:8], anchors
+
+
+def _compound_relation_signals(compound_hex: Optional[Dict[str, Any]]) -> Tuple[Dict[str, int], List[str], int]:
+    scores = {"亲密": 0, "同辈": 0, "照护": 0, "合作": 0, "冲突": 0, "亲缘": 0}
+    evidence: List[str] = []
+    anchors = 0
+    if not compound_hex:
+        return scores, evidence, anchors
+
+    ti_yong = compound_hex.get("体用分析") or {}
+    relation = ti_yong.get("体用关系", "")
+    if relation in {"比和", "用生体"}:
+        scores["亲密"] += 3
+        scores["合作"] += 2
+        evidence.append(f"关系复合卦体用{relation}，关系场有相生或同频象")
+    elif relation == "体克用":
+        scores["合作"] += 2
+        scores["冲突"] += 1
+        evidence.append("关系复合卦体克用，主动方可推动但费力")
+    elif relation in {"用克体", "体生用"}:
+        scores["冲突"] += 3
+        evidence.append(f"关系复合卦体用{relation}，关系场有消耗或压力")
+
+    for key in ("本卦", "互卦", "变卦"):
+        name = ((compound_hex.get(key) or {}).get("卦名") or "")
+        if not name:
+            continue
+        if any(word in name for word in ["咸", "归妹", "家人", "泰", "同人", "比"]):
+            scores["亲密"] += 2
+            anchors += 1 if key == "本卦" else 0
+            evidence.append(f"关系复合卦{key}为{name}，有亲近/关系牵动象")
+        if any(word in name for word in ["睽", "否", "讼", "困", "革", "剥"]):
+            scores["冲突"] += 2
+            evidence.append(f"关系复合卦{key}为{name}，有阻隔/分歧/变动象")
+
+    return scores, evidence[:8], anchors
+
+
+def _add_signal(signals: List[Dict[str, Any]], label: str, strength: float, direction: str, evidence: str) -> None:
+    strength = max(0.0, min(1.0, float(strength)))
+    signals.append({"标签": label, "强度": round(strength, 2), "方向": direction, "依据": evidence})
+
+
+def _relation_label_scores(signals: List[Dict[str, Any]]) -> Dict[str, float]:
+    scores: Dict[str, float] = {}
+    for signal in signals:
+        label = str(signal.get("标签", ""))
+        if not label:
+            continue
+        scores[label] = scores.get(label, 0.0) + float(signal.get("强度", 0.0))
+    return scores
+
+
+def _dominant_labels(signals: List[Dict[str, Any]], count: int = 3) -> List[str]:
+    scores = _relation_label_scores(signals)
+    return [label for label, _ in sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:count]]
+
+
+def _extract_liuyao_semantics(liuyao: Dict[str, Any]) -> Dict[str, Any]:
+    signals: List[Dict[str, Any]] = []
+    evidence: List[str] = []
+    if not liuyao or liuyao.get("错误"):
+        return {"术数": "六爻", "语义层": ["事实层", "关系性质层", "趋势概率层"], "标签": signals, "摘要": "六爻盘不可用", "证据": evidence}
+
+    gua_name = str(liuyao.get("卦名", ""))
+    if any(word in gua_name for word in ["咸", "归妹", "家人", "泰", "同人", "比", "兑"]):
+        _add_signal(signals, "亲密牵引", 0.75, "合", f"六爻卦名为{gua_name}，有关系/亲近象")
+    if any(word in gua_name for word in ["睽", "否", "讼", "困", "革", "剥"]):
+        _add_signal(signals, "关系阻隔", 0.65, "冲", f"六爻卦名为{gua_name}，有分歧/阻隔象")
+
+    for yao in liuyao.get("六爻", []):
+        liu_qin = yao.get("六亲", "")
+        pos = yao.get("爻名") or yao.get("爻位")
+        if yao.get("世"):
+            evidence.append(f"世爻临{liu_qin}")
+        if yao.get("应"):
+            evidence.append(f"应爻临{liu_qin}")
+            if liu_qin in {"妻财", "官鬼"}:
+                _add_signal(signals, "亲密/权责牵连", 0.8, "合", f"应爻临{liu_qin}，可作亲密、资源或责任牵连象")
+            elif liu_qin == "兄弟":
+                _add_signal(signals, "同辈竞争", 0.55, "冲", "应爻临兄弟，平辈、竞争或分担象增强")
+            elif liu_qin == "父母":
+                _add_signal(signals, "照护承接", 0.55, "中性", "应爻临父母，照护、承接或文书规则象增强")
+            elif liu_qin == "子孙":
+                _add_signal(signals, "轻松互动", 0.5, "合", "应爻临子孙，轻松表达或晚辈照护象增强")
+        if yao.get("动爻"):
+            direction = "冲" if liu_qin in {"兄弟", "官鬼"} else "变"
+            _add_signal(signals, "当前变化点", 0.6, direction, f"六爻{pos}爻发动，临{liu_qin}")
+
+    summary = "当前问事盘提供关系事实与状态快照"
+    labels = _dominant_labels(signals)
+    if labels:
+        summary = "六爻重点提示：" + "、".join(labels)
+    return {"术数": "六爻", "语义层": ["事实层", "关系性质层", "趋势概率层"], "标签": signals, "摘要": summary, "证据": evidence}
+
+
+def _extract_qimen_semantics(qimen: Dict[str, Any]) -> Dict[str, Any]:
+    signals: List[Dict[str, Any]] = []
+    evidence: List[str] = []
+    if not qimen or qimen.get("错误"):
+        return {"术数": "奇门", "语义层": ["动态行为层", "关系性质层"], "标签": signals, "摘要": "奇门盘不可用", "证据": evidence}
+
+    door_scores = {"开": ("主动推进", 0.65, "合"), "休": ("缓和维持", 0.55, "合"), "生": ("发展生机", 0.7, "合"),
+                   "伤": ("互动损伤", 0.65, "冲"), "杜": ("阻隔保留", 0.6, "阻"), "景": ("显化曝光", 0.45, "变"),
+                   "死": ("停滞低迷", 0.7, "阻"), "惊": ("不安波动", 0.6, "冲")}
+    for gong, palace in (qimen.get("九宫") or {}).items():
+        shen = palace.get("八神", "")
+        door = palace.get("八门", "")
+        star = palace.get("九星", "")
+        if shen == "六合":
+            _add_signal(signals, "合和往来", 0.75, "合", f"奇门{gong}宫见六合，门为{door}")
+        if shen in {"玄武", "螣蛇"}:
+            _add_signal(signals, "暗线/疑虑", 0.55, "变", f"奇门{gong}宫见{shen}")
+        if shen in {"白虎", "勾陈"}:
+            _add_signal(signals, "压力阻力", 0.55, "冲", f"奇门{gong}宫见{shen}")
+        if door in door_scores:
+            label, strength, direction = door_scores[door]
+            if door in {"开", "休", "生", "伤", "杜", "死", "惊"}:
+                _add_signal(signals, label, strength, direction, f"奇门{gong}宫八门为{door}，九星为{star}")
+                evidence.append(f"{gong}宫：{door}门、{shen}、{star}")
+
+    labels = _dominant_labels(signals)
+    summary = "奇门重点提示：" + "、".join(labels) if labels else "奇门未见强烈单一互动路径"
+    return {"术数": "奇门", "语义层": ["动态行为层", "关系性质层"], "标签": signals, "摘要": summary, "证据": evidence[:8]}
+
+
+def _extract_meihua_semantics(meihua: Dict[str, Any]) -> Dict[str, Any]:
+    signals: List[Dict[str, Any]] = []
+    evidence: List[str] = []
+    if not meihua or meihua.get("错误"):
+        return {"术数": "梅花", "语义层": ["趋势概率层", "关系性质层"], "标签": signals, "摘要": "梅花盘不可用", "证据": evidence}
+
+    ti_yong = meihua.get("体用分析") or {}
+    relation = ti_yong.get("体用关系", "")
+    if relation in {"比和", "用生体", "体克用"}:
+        strength = 0.8 if relation in {"比和", "用生体"} else 0.55
+        _add_signal(signals, "趋势向合", strength, "合", f"梅花体用关系为{relation}：{ti_yong.get('断语', '')}")
+    elif relation in {"用克体", "体生用"}:
+        strength = 0.8 if relation == "用克体" else 0.6
+        _add_signal(signals, "趋势消耗", strength, "冲", f"梅花体用关系为{relation}：{ti_yong.get('断语', '')}")
+
+    for key in ("本卦", "互卦", "变卦"):
+        name = ((meihua.get(key) or {}).get("卦名") or "")
+        if name:
+            evidence.append(f"{key}为{name}")
+        if any(word in name for word in ["咸", "归妹", "家人", "泰", "同人"]):
+            _add_signal(signals, "关系象增强", 0.55, "合", f"梅花{key}为{name}")
+        if any(word in name for word in ["睽", "否", "讼", "困"]):
+            _add_signal(signals, "分歧阻隔", 0.55, "冲", f"梅花{key}为{name}")
+
+    labels = _dominant_labels(signals)
+    summary = "梅花重点提示：" + "、".join(labels) if labels else "梅花主要作趋势象意补充"
+    return {"术数": "梅花", "语义层": ["趋势概率层", "关系性质层"], "标签": signals, "摘要": summary, "证据": evidence}
+
+
+def _extract_compound_hex_semantics(compound_hex: Dict[str, Any]) -> Dict[str, Any]:
+    signals: List[Dict[str, Any]] = []
+    evidence: List[str] = []
+    if not compound_hex:
+        return {"术数": "关系复合卦", "语义层": ["关系性质层", "结构稳定层", "底层因果层"], "标签": signals, "摘要": "关系复合卦不可用", "证据": evidence}
+
+    ti_yong = compound_hex.get("体用分析") or {}
+    relation = ti_yong.get("体用关系", "")
+    if relation in {"比和", "用生体", "体克用"}:
+        strength = 0.75 if relation in {"比和", "用生体"} else 0.55
+        _add_signal(signals, "关系场有牵引", strength, "合", f"复合卦体用关系为{relation}：{ti_yong.get('断语', '')}")
+    elif relation in {"用克体", "体生用"}:
+        strength = 0.75 if relation == "用克体" else 0.6
+        _add_signal(signals, "关系场有消耗", strength, "冲", f"复合卦体用关系为{relation}：{ti_yong.get('断语', '')}")
+
+    for key in ("本卦", "互卦", "变卦"):
+        name = ((compound_hex.get(key) or {}).get("卦名") or "")
+        if name:
+            evidence.append(f"{key}为{name}")
+        if any(word in name for word in ["咸", "归妹", "家人", "泰", "同人", "比"]):
+            _add_signal(signals, "关系场亲近", 0.6, "合", f"复合卦{key}为{name}")
+        if any(word in name for word in ["睽", "否", "讼", "困", "革", "剥"]):
+            _add_signal(signals, "关系场阻隔", 0.6, "冲", f"复合卦{key}为{name}")
+
+    labels = _dominant_labels(signals)
+    summary = "关系复合卦提示：" + "、".join(labels) if labels else "关系复合卦主要用于校验双人关系场"
+    return {"术数": "关系复合卦", "语义层": ["关系性质层", "结构稳定层", "底层因果层"], "标签": signals, "摘要": summary, "证据": evidence}
+
+
+def _extract_daliuren_semantics(dlr: Dict[str, Any]) -> Dict[str, Any]:
+    signals: List[Dict[str, Any]] = []
+    evidence: List[str] = []
+    if not dlr:
+        return {"术数": "大六壬", "语义层": ["底层因果层", "动态行为层", "事实层"], "标签": signals, "摘要": "大六壬盘不可用", "证据": evidence}
+
+    for owner_label, pan in dlr.items():
+        if not isinstance(pan, dict) or pan.get("错误"):
+            continue
+        chuan = pan.get("三传") or {}
+        method = chuan.get("起传法", "")
+        if method:
+            evidence.append(f"{owner_label}起传法为{method}")
+        for pos in ("初传", "中传", "末传"):
+            item = chuan.get(pos) or {}
+            tian_jiang = item.get("天将", "")
+            gan_zhi = item.get("干支", "")
+            if tian_jiang == "六合":
+                _add_signal(signals, "因果牵连", 0.75, "合", f"大六壬{owner_label}{pos}见六合（{gan_zhi}）")
+            elif tian_jiang == "天后":
+                _add_signal(signals, "亲密/收束象", 0.65, "合", f"大六壬{owner_label}{pos}见天后（{gan_zhi}）")
+            elif tian_jiang in {"螣蛇", "天空", "白虎", "勾陈"}:
+                _add_signal(signals, "过程阻滞", 0.6, "冲", f"大六壬{owner_label}{pos}见{tian_jiang}（{gan_zhi}）")
+            elif tian_jiang in {"青龙", "太常", "太阴", "贵人"}:
+                _add_signal(signals, "过程助力", 0.55, "合", f"大六壬{owner_label}{pos}见{tian_jiang}（{gan_zhi}）")
+
+    labels = _dominant_labels(signals)
+    summary = "大六壬重点提示：" + "、".join(labels) if labels else "大六壬主要用于观察过程链条"
+    return {"术数": "大六壬", "语义层": ["底层因果层", "动态行为层", "事实层"], "标签": signals, "摘要": summary, "证据": evidence[:8]}
+
+
+def _extract_bazi_semantics(bazi_pair: Dict[str, Any]) -> Dict[str, Any]:
+    signals: List[Dict[str, Any]] = []
+    evidence: List[str] = []
+    if not bazi_pair or bazi_pair.get("错误"):
+        return {"术数": "八字", "语义层": ["结构稳定层", "底层因果层"], "标签": signals, "摘要": "八字合盘不可用", "证据": evidence}
+
+    score = int(bazi_pair.get("关系张力评分", 50))
+    if score >= 70:
+        _add_signal(signals, "长期结构较稳", 0.8, "合", f"八字关系张力评分{score}")
+    elif score >= 55:
+        _add_signal(signals, "长期结构中等", 0.6, "中性", f"八字关系张力评分{score}")
+    elif score >= 40:
+        _add_signal(signals, "长期结构有波动", 0.65, "冲", f"八字关系张力评分{score}")
+    else:
+        _add_signal(signals, "长期结构冲克", 0.8, "冲", f"八字关系张力评分{score}")
+
+    for row in bazi_pair.get("四柱对照", []):
+        pos = row.get("柱位", "")
+        rels = row.get("地支关系", []) + row.get("天干关系", [])
+        joined = "、".join(rels)
+        if joined:
+            evidence.append(f"{pos}：{joined}")
+        if any(rel == "六合" or "半合" in rel for rel in rels):
+            _add_signal(signals, "结构牵引", 0.55 if pos != "日柱" else 0.75, "合", f"八字{pos}见{joined}")
+        if any(rel in {"六冲", "六害", "刑"} for rel in rels):
+            _add_signal(signals, "结构张力", 0.55 if pos != "日柱" else 0.8, "冲", f"八字{pos}见{joined}")
+
+    labels = _dominant_labels(signals)
+    summary = "八字重点提示：" + "、".join(labels) if labels else "八字主要用于长期结构判断"
+    return {"术数": "八字", "语义层": ["结构稳定层", "底层因果层"], "标签": signals, "摘要": summary, "证据": evidence[:8]}
+
+
+def _extract_ziwei_semantics(ziwei_pair: Dict[str, Any]) -> Dict[str, Any]:
+    signals: List[Dict[str, Any]] = []
+    evidence: List[str] = []
+    if not ziwei_pair or ziwei_pair.get("错误"):
+        return {"术数": "紫微", "语义层": ["结构稳定层", "底层因果层", "关系性质层"], "标签": signals, "摘要": "紫微合盘不可用", "证据": evidence}
+
+    score = int(ziwei_pair.get("紫微合盘评分", 50))
+    if score >= 70:
+        _add_signal(signals, "命盘互动较强", 0.75, "合", f"紫微合盘评分{score}")
+    elif score >= 55:
+        _add_signal(signals, "命盘互动中等", 0.55, "中性", f"紫微合盘评分{score}")
+    else:
+        _add_signal(signals, "命盘结构偏弱", 0.65, "冲", f"紫微合盘评分{score}")
+
+    for line in ziwei_pair.get("紫微互动线索", []):
+        evidence.append(str(line))
+        if "夫妻宫" in str(line):
+            _add_signal(signals, "婚恋宫位牵动", 0.75, "合", str(line))
+        elif "子女宫" in str(line):
+            _add_signal(signals, "照护/晚辈议题", 0.55, "中性", str(line))
+        elif "父母宫" in str(line):
+            _add_signal(signals, "长辈/承接议题", 0.55, "中性", str(line))
+        elif "相冲" in str(line):
+            _add_signal(signals, "宫位冲突", 0.65, "冲", str(line))
+        elif "六合" in str(line) or "同支" in str(line):
+            _add_signal(signals, "宫位吸引", 0.6, "合", str(line))
+
+    labels = _dominant_labels(signals)
+    summary = "紫微重点提示：" + "、".join(labels) if labels else "紫微主要用于人生结构与宫位牵动"
+    return {"术数": "紫微", "语义层": ["结构稳定层", "底层因果层", "关系性质层"], "标签": signals, "摘要": summary, "证据": evidence[:8]}
+
+
+def _build_method_semantics(
+    bazi_pair: Dict[str, Any],
+    ziwei_pair: Dict[str, Any],
+    current_question: Dict[str, Any],
+    compound_hex: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    return {
+        "六爻": _extract_liuyao_semantics(current_question.get("六爻") or {}),
+        "奇门": _extract_qimen_semantics(current_question.get("奇门遁甲") or {}),
+        "梅花": _extract_meihua_semantics(current_question.get("梅花易数") or {}),
+        "大六壬": _extract_daliuren_semantics(current_question.get("大六壬") or {}),
+        "八字": _extract_bazi_semantics(bazi_pair),
+        "紫微": _extract_ziwei_semantics(ziwei_pair),
+        "关系复合卦": _extract_compound_hex_semantics(compound_hex or {}),
+    }
+
+
+def _weighted_layer_scores(method_semantics: Dict[str, Any], weights: Dict[str, int]) -> Dict[str, Dict[str, float]]:
+    layer_scores: Dict[str, Dict[str, float]] = {}
+    for method, info in method_semantics.items():
+        weight = weights.get(method, 0) / 100.0
+        if weight <= 0:
+            continue
+        for layer in info.get("语义层", []):
+            layer_bucket = layer_scores.setdefault(layer, {})
+            for signal in info.get("标签", []):
+                label = str(signal.get("标签", ""))
+                if not label:
+                    continue
+                value = float(signal.get("强度", 0.0)) * weight
+                layer_bucket[label] = layer_bucket.get(label, 0.0) + value
+    return layer_scores
+
+
+def _top_weighted_labels(layer_scores: Dict[str, Dict[str, float]], layer: str, count: int = 3) -> List[str]:
+    scores = layer_scores.get(layer, {})
+    return [label for label, _ in sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:count]]
+
+
+def _layer_statement(layer: str, labels: List[str]) -> str:
+    if not labels:
+        return "该层信号不强，需结合其他层判断。"
+    joined = "、".join(labels)
+    templates = {
+        "事实层": f"当前事实/状态层以“{joined}”为主，只说明当下互动象，不等同现实身份证明。",
+        "关系性质层": f"关系性质层呈现“{joined}”，适合描述两人的互动类型与关系气质。",
+        "结构稳定层": f"长期结构层以“{joined}”为主，用于判断稳定性、适配度与长期张力。",
+        "动态行为层": f"动态行为层显示“{joined}”，用于观察谁在推进、阻滞或拉扯。",
+        "趋势概率层": f"趋势层偏向“{joined}”，说明未来走向的概率象。",
+        "底层因果层": f"因果层重点为“{joined}”，用于解释这段关系为什么呈现当前状态。",
+    }
+    return templates.get(layer, f"{layer}：{joined}")
+
+
+def _semantic_layer_summary(layer_scores: Dict[str, Dict[str, float]]) -> Dict[str, Any]:
+    layers = {}
+    for layer in ["事实层", "关系性质层", "结构稳定层", "动态行为层", "趋势概率层", "底层因果层"]:
+        labels = _top_weighted_labels(layer_scores, layer)
+        layers[layer] = {
+            "主要标签": labels,
+            "标签分数": {k: round(v, 3) for k, v in sorted((layer_scores.get(layer) or {}).items(), key=lambda kv: kv[1], reverse=True)},
+            "解释": _layer_statement(layer, labels),
+        }
+    return layers
+
+
+def _relationship_main_definition(layers: Dict[str, Any], identification: Dict[str, Any], declared_relation: str) -> str:
+    declared = _declared_relation_text(declared_relation)
+    fact_labels = layers.get("事实层", {}).get("主要标签", [])
+    type_labels = layers.get("关系性质层", {}).get("主要标签", [])
+    structure_labels = layers.get("结构稳定层", {}).get("主要标签", [])
+
+    if declared != "未提供":
+        base = f"以用户声明的“{declared}”作为现实关系前提，盘面只分析这段关系的状态、结构和趋势。"
+    else:
+        base = "用户未声明现实关系，盘面只给关系画像，不把术数象意当作现实身份或法律/血缘证明。"
+
+    type_text = "、".join(type_labels[:2]) if type_labels else identification.get("关系描述", "关系画像不明")
+    fact_text = "、".join(fact_labels[:2]) if fact_labels else "当下事实信号不强"
+    structure_text = "、".join(structure_labels[:2]) if structure_labels else "长期结构需谨慎判断"
+    return f"{base}当前更适合表述为：{type_text}；当下状态见{fact_text}；长期结构见{structure_text}。"
+
+
+def _build_integrated_explanation(layers: Dict[str, Any], identification: Dict[str, Any], declared_relation: str) -> Dict[str, Any]:
+    dynamic_labels = layers.get("动态行为层", {}).get("主要标签", [])
+    trend_labels = layers.get("趋势概率层", {}).get("主要标签", [])
+    causal_labels = layers.get("底层因果层", {}).get("主要标签", [])
+    structure_labels = layers.get("结构稳定层", {}).get("主要标签", [])
+
+    main = _relationship_main_definition(layers, identification, declared_relation)
+    structure = "、".join(structure_labels) if structure_labels else "结构层信号不集中"
+    dynamic = "、".join(dynamic_labels) if dynamic_labels else "动态层信号不集中"
+    trend = "、".join(trend_labels) if trend_labels else "趋势层信号不集中"
+    causal = "、".join(causal_labels) if causal_labels else "因果层信号不集中"
+    difference = (
+        "若短期状态与长期结构不同，应并列解释：六爻/六壬偏当前是否发生，"
+        "八字/紫微偏长期能否稳定，奇门/梅花偏过程和走向。"
+    )
+
+    return {
+        "主关系定义": main,
+        "结构描述": f"长期结构：{structure}。",
+        "动态描述": f"当前过程：{dynamic}。",
+        "趋势描述": f"未来走向：{trend}。",
+        "因果描述": f"底层原因：{causal}。",
+        "差异说明": difference,
+        "身份边界": "除非用户明确声明或现实证据确认，否则不直接断言夫妻、情人、亲子等现实身份。",
+    }
+
+
+def _collect_label_score(
+    method_semantics: Dict[str, Any],
+    method: str,
+    keywords: List[str],
+    multiplier: float = 1.0,
+    cap: Optional[float] = None,
+) -> float:
+    info = method_semantics.get(method) or {}
+    total = 0.0
+    for signal in info.get("标签", []):
+        label = str(signal.get("标签", ""))
+        evidence = str(signal.get("依据", ""))
+        if any(word in label or word in evidence for word in keywords):
+            total += float(signal.get("强度", 0.0)) * multiplier
+    if cap is not None:
+        return min(total, cap)
+    return total
+
+
+def _candidate_level(score: float) -> str:
+    if score >= 0.72:
+        return "高"
+    if score >= 0.45:
+        return "中"
+    if score >= 0.22:
+        return "偏低"
+    return "低"
+
+
+def _relationship_candidate_ranking(
+    method_semantics: Dict[str, Any],
+    bazi_pair: Dict[str, Any],
+    ziwei_pair: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    scores = {
+        "婚恋/暧昧/亲密牵连": 0.0,
+        "朋友/同辈互动": 0.0,
+        "合作/利益/权责关系": 0.0,
+        "亲缘/照护/长幼关系": 0.0,
+        "冲突/竞争/消耗关系": 0.0,
+    }
+    reasons: Dict[str, List[str]] = {key: [] for key in scores}
+
+    intimate = (
+        _collect_label_score(method_semantics, "六爻", ["亲密", "官鬼", "妻财", "关系象"], 1.35, 1.1)
+        + _collect_label_score(method_semantics, "奇门", ["合和", "六合"], 0.85, 0.35)
+        + _collect_label_score(method_semantics, "梅花", ["向合", "关系象"], 0.8, 0.4)
+        + _collect_label_score(method_semantics, "大六壬", ["天后", "六合", "亲密", "牵连"], 0.7, 0.35)
+        + _collect_label_score(method_semantics, "紫微", ["夫妻", "婚恋"], 0.9, 0.45)
+    )
+    scores["婚恋/暧昧/亲密牵连"] += intimate
+    if intimate:
+        reasons["婚恋/暧昧/亲密牵连"].append("六爻/奇门/梅花或六壬出现亲密、合和、牵连象")
+
+    cooperation = (
+        _collect_label_score(method_semantics, "六爻", ["权责", "父母", "官鬼"], 0.8, 0.45)
+        + _collect_label_score(method_semantics, "奇门", ["主动推进", "合和往来", "开门"], 0.75, 0.3)
+        + _collect_label_score(method_semantics, "大六壬", ["太常", "过程助力"], 0.65, 0.25)
+    )
+    scores["合作/利益/权责关系"] += cooperation
+    if cooperation:
+        reasons["合作/利益/权责关系"].append("盘面有权责、协作、现实事务往来信号")
+
+    peer = _collect_label_score(method_semantics, "六爻", ["同辈", "兄弟"], 1.0, 0.7)
+    scores["朋友/同辈互动"] += peer
+    if peer:
+        reasons["朋友/同辈互动"].append("六爻见同辈或兄弟象")
+
+    care = (
+        _collect_label_score(method_semantics, "六爻", ["照护", "父母", "子孙"], 1.0, 0.55)
+        + _collect_label_score(method_semantics, "紫微", ["照护", "晚辈", "长辈", "承接"], 0.8, 0.45)
+    )
+    scores["亲缘/照护/长幼关系"] += care
+    if care:
+        reasons["亲缘/照护/长幼关系"].append("盘面有照护、承接、父母子女类象")
+
+    conflict = (
+        _collect_label_score(method_semantics, "八字", ["结构张力", "冲克", "六冲", "六害"], 1.25, 0.9)
+        + _collect_label_score(method_semantics, "奇门", ["损伤", "阻隔", "压力", "不安", "停滞"], 0.7, 0.35)
+        + _collect_label_score(method_semantics, "大六壬", ["阻滞", "白虎", "天空", "勾陈"], 0.7, 0.25)
+        + _collect_label_score(method_semantics, "梅花", ["消耗", "分歧", "阻隔"], 0.6, 0.2)
+    )
+    scores["冲突/竞争/消耗关系"] += conflict
+    if conflict:
+        reasons["冲突/竞争/消耗关系"].append("八字冲害与问事盘阻滞信号显示关系张力")
+
+    bazi_score = int(bazi_pair.get("关系张力评分", 50)) if isinstance(bazi_pair, dict) else 50
+    ziwei_score = int(ziwei_pair.get("紫微合盘评分", 50)) if isinstance(ziwei_pair, dict) else 50
+    if bazi_score < 45:
+        scores["冲突/竞争/消耗关系"] += 0.35
+        reasons["冲突/竞争/消耗关系"].append(f"八字关系张力评分{bazi_score}，长期结构偏弱")
+    if ziwei_score < 55:
+        scores["婚恋/暧昧/亲密牵连"] -= 0.08
+        reasons["婚恋/暧昧/亲密牵连"].append(f"紫微合盘评分{ziwei_score}，不支持直接锁定稳定婚姻结构")
+
+    ranked = []
+    denominators = {
+        "婚恋/暧昧/亲密牵连": 2.2,
+        "合作/利益/权责关系": 2.8,
+        "朋友/同辈互动": 1.6,
+        "亲缘/照护/长幼关系": 1.8,
+        "冲突/竞争/消耗关系": 3.0,
+    }
+    for name, score in scores.items():
+        normalized = max(0.0, min(1.0, score / denominators.get(name, 2.2)))
+        ranked.append({
+            "类型": name,
+            "强度": round(normalized, 2),
+            "等级": _candidate_level(normalized),
+            "依据": reasons[name] or ["该类型信号不明显"],
+        })
+    return sorted(ranked, key=lambda item: item["强度"], reverse=True)
+
+
+def _relationship_not_like(ranking: List[Dict[str, Any]]) -> List[str]:
+    weak = [item["类型"] for item in ranking if item["强度"] <= 0.25]
+    return weak[:2]
+
+
+def _brief_from_labels(labels: List[str], fallback: str) -> str:
+    if not labels:
+        return fallback
+    return "、".join(labels[:2])
+
+
+def _build_user_facing_conclusion(
+    layers: Dict[str, Any],
+    identification: Dict[str, Any],
+    declared_relation: str,
+    method_semantics: Dict[str, Any],
+    bazi_pair: Dict[str, Any],
+    ziwei_pair: Dict[str, Any],
+) -> Dict[str, Any]:
+    ranking = _relationship_candidate_ranking(method_semantics, bazi_pair, ziwei_pair)
+    top = ranking[0] if ranking else {"类型": "关系画像不明", "等级": "低", "强度": 0}
+    second = ranking[1] if len(ranking) > 1 else None
+    not_like = _relationship_not_like(ranking)
+
+    fact = _brief_from_labels(layers.get("事实层", {}).get("主要标签", []), "当前事实信号不够集中")
+    structure = _brief_from_labels(layers.get("结构稳定层", {}).get("主要标签", []), "长期结构需要谨慎观察")
+    dynamic = _brief_from_labels(layers.get("动态行为层", {}).get("主要标签", []), "互动过程信号不集中")
+    trend = _brief_from_labels(layers.get("趋势概率层", {}).get("主要标签", []), "趋势暂不明朗")
+
+    declared = _declared_relation_text(declared_relation)
+    boundary = "这是盘面关系画像，只说明关系状态与质量，不用于证明或否认现实身份。"
+    if declared != "未提供":
+        boundary = f"用户已声明“{declared}”，以下结论是在该现实前提下判断状态和质量。"
+
+    top_type = top["类型"]
+    second_text = f"，其次带有“{second['类型']}”信号" if second and second["强度"] >= 0.35 else ""
+    not_like_text = "；不像" + "、".join(not_like) if not_like else ""
+    one_sentence = f"盘面最像“{top_type}”（{top['等级']}）{second_text}{not_like_text}。{boundary}"
+
+    if "婚恋" in top_type or "亲密" in top_type:
+        user_answer = "两人的互动质量更偏亲密/伴侣式牵连；如果现实中已是夫妻或伴侣，本盘重点是在说这段关系的状态与稳定性，不是在否认身份。"
+    elif "合作" in top_type:
+        user_answer = "更像有现实事务、权责或合作牵连的关系，亲密象不是主轴。"
+    elif "冲突" in top_type:
+        user_answer = "更像带冲突、竞争或消耗色彩的关系，吸引或往来不一定代表稳定。"
+    elif "照护" in top_type:
+        user_answer = "更像照护、承接、长幼或依赖色彩较重的关系。"
+    else:
+        user_answer = "更像同辈互动或一般社交关系，亲密和结构承诺信号不强。"
+
+    stability = "偏低"
+    bazi_score = int(bazi_pair.get("关系张力评分", 50)) if isinstance(bazi_pair, dict) else 50
+    ziwei_score = int(ziwei_pair.get("紫微合盘评分", 50)) if isinstance(ziwei_pair, dict) else 50
+    if bazi_score >= 65 and ziwei_score >= 60:
+        stability = "较高"
+    elif bazi_score >= 50 and ziwei_score >= 50:
+        stability = "中等"
+    elif bazi_score >= 40:
+        stability = "偏低"
+    else:
+        stability = "低"
+
+    return {
+        "一句话结论": one_sentence,
+        "直接回答": user_answer,
+        "最像关系": top,
+        "候选关系排行": ranking,
+        "不像关系": not_like,
+        "当前状态": f"{fact}；过程上见{dynamic}。",
+        "长期稳定性": f"{stability}。结构层主要是{structure}。",
+        "发展趋势": f"{trend}。",
+        "关键依据": [
+            "六爻/六壬优先看当前是否有互动与牵连",
+            "八字/紫微优先看长期结构和稳定性",
+            "奇门/梅花优先看行为路径与后续趋势",
+        ],
+        "现实边界": boundary,
+    }
+
+
+def _build_relationship_meta_interpreter(
+    question: str,
+    declared_relation: str,
+    bazi_pair: Dict[str, Any],
+    ziwei_pair: Dict[str, Any],
+    current_question: Dict[str, Any],
+    compound_hex: Dict[str, Any],
+    identification: Dict[str, Any],
+) -> Dict[str, Any]:
+    task = _classify_relationship_task(question, declared_relation)
+    weights = _relationship_weights_for_task(task["primary_task"])
+    method_semantics = _build_method_semantics(bazi_pair, ziwei_pair, current_question, compound_hex)
+    layer_scores = _weighted_layer_scores(method_semantics, weights)
+    layers = _semantic_layer_summary(layer_scores)
+    integrated = _build_integrated_explanation(layers, identification, declared_relation)
+    user_conclusion = _build_user_facing_conclusion(
+        layers,
+        identification,
+        declared_relation,
+        method_semantics,
+        bazi_pair,
+        ziwei_pair,
+    )
+
+    return {
+        "问题识别": task,
+        "权重调度": {
+            "原则": "权重不是谁更准，而是谁更适合回答本题。",
+            "权重表": _weight_rows(weights),
+        },
+        "用户结论": user_conclusion,
+        "各术数语义标签": method_semantics,
+        "任务语义汇总": layers,
+        "综合断语": integrated,
+        "显示建议": [
+            "先展示问题识别与权重调度，让用户知道本题谁主谁辅。",
+            "再逐术数展示独立分析，避免六术互相抢结论。",
+            "最后展示语义汇总与综合断语，把当前状态、长期结构、动态趋势分开说。",
+        ],
+    }
+
+
+def _format_yao_brief(yao: Dict[str, Any]) -> str:
+    if not yao:
+        return "未见"
+    flags = []
+    if yao.get("世"):
+        flags.append("世")
+    if yao.get("应"):
+        flags.append("应")
+    if yao.get("动爻"):
+        flags.append(f"动化{yao.get('变支') or ''}".rstrip())
+    if yao.get("旬空"):
+        flags.append("旬空")
+    if yao.get("月破"):
+        flags.append("月破")
+    flag_text = "，".join(flags)
+    return f"{yao.get('爻名', yao.get('爻位'))}爻 {yao.get('干支', '')} {yao.get('六亲', '')}{'（' + flag_text + '）' if flag_text else ''}"
+
+
+def _raw_liuyao_points(liuyao: Dict[str, Any]) -> Dict[str, Any]:
+    if not liuyao or liuyao.get("错误"):
+        return {"可用": False, "错误": liuyao.get("错误") if isinstance(liuyao, dict) else "六爻盘缺失"}
+    yaos = liuyao.get("六爻", [])
+    shi = next((y for y in yaos if y.get("世")), {})
+    ying = next((y for y in yaos if y.get("应")), {})
+    moving = [y for y in yaos if y.get("动爻")]
+    empties = [f"{y.get('爻名', y.get('爻位'))}爻{y.get('六亲', '')}{y.get('干支', '')}" for y in yaos if y.get("旬空")]
+    return {
+        "可用": True,
+        "卦名": liuyao.get("卦名", ""),
+        "宫属": liuyao.get("宫属", ""),
+        "月建": liuyao.get("月建", ""),
+        "日建": liuyao.get("日建", ""),
+        "旬空": liuyao.get("旬空地支", []),
+        "世爻": _format_yao_brief(shi),
+        "应爻": _format_yao_brief(ying),
+        "动爻": [_format_yao_brief(y) for y in moving] or ["无动爻"],
+        "落空爻": empties or ["无"],
+        "判读锚点": ["世应关系", "动爻", "旬空/月破", "六亲主线"],
+    }
+
+
+def _raw_bazi_points(bazi_pair: Dict[str, Any]) -> Dict[str, Any]:
+    if not bazi_pair or bazi_pair.get("错误"):
+        return {"可用": False, "错误": bazi_pair.get("错误") if isinstance(bazi_pair, dict) else "八字合盘缺失"}
+    rows = []
+    for row in bazi_pair.get("四柱对照", []):
+        rels = row.get("天干关系", []) + row.get("地支关系", [])
+        rows.append({
+            "柱位": row.get("柱位", ""),
+            "第一命主": row.get("第一命主", ""),
+            "第二命主": row.get("第二命主", ""),
+            "关系": rels,
+        })
+    return {
+        "可用": True,
+        "关系张力评分": bazi_pair.get("关系张力评分"),
+        "关系张力等级": bazi_pair.get("关系张力等级"),
+        "日主关系": bazi_pair.get("日主关系", {}),
+        "四柱对照": rows,
+        "五行互补": bazi_pair.get("五行互补", []),
+        "判读锚点": ["日柱", "月柱", "冲合刑害", "五行互补"],
+    }
+
+
+def _raw_ziwei_points(ziwei_pair: Dict[str, Any]) -> Dict[str, Any]:
+    if not ziwei_pair or ziwei_pair.get("错误"):
+        return {"可用": False, "错误": ziwei_pair.get("错误") if isinstance(ziwei_pair, dict) else "紫微合盘缺失"}
+    return {
+        "可用": True,
+        "紫微合盘评分": ziwei_pair.get("紫微合盘评分"),
+        "紫微合盘等级": ziwei_pair.get("紫微合盘等级"),
+        "互动线索": ziwei_pair.get("紫微互动线索", []),
+        "第一命主命宫": (ziwei_pair.get("第一命主重点宫位", {}).get("命宫") or {}),
+        "第一命主夫妻宫": (ziwei_pair.get("第一命主重点宫位", {}).get("夫妻") or {}),
+        "第二命主命宫": (ziwei_pair.get("第二命主重点宫位", {}).get("命宫") or {}),
+        "第二命主夫妻宫": (ziwei_pair.get("第二命主重点宫位", {}).get("夫妻") or {}),
+        "判读锚点": ["命宫", "夫妻宫", "宫位牵动", "四化/星曜"],
+    }
+
+
+def _raw_qimen_points(qimen: Dict[str, Any]) -> Dict[str, Any]:
+    if not qimen or qimen.get("错误"):
+        return {"可用": False, "错误": qimen.get("错误") if isinstance(qimen, dict) else "奇门盘缺失"}
+    highlights = []
+    for gong, palace in (qimen.get("九宫") or {}).items():
+        if palace.get("八神") in {"六合", "玄武", "白虎", "螣蛇", "值符"} or palace.get("八门") in {"开", "生", "死", "伤", "杜", "惊"}:
+            highlights.append({
+                "宫": gong,
+                "方位": palace.get("方位", ""),
+                "天盘": palace.get("天盘", ""),
+                "地盘": palace.get("地盘", ""),
+                "九星": palace.get("九星", ""),
+                "八门": palace.get("八门", ""),
+                "八神": palace.get("八神", ""),
+            })
+    return {
+        "可用": True,
+        "遁型": qimen.get("遁型", ""),
+        "局数": qimen.get("局数", ""),
+        "值符星": qimen.get("值符星", ""),
+        "值使门": qimen.get("值使门", ""),
+        "旬空": qimen.get("旬空", []),
+        "关键宫": highlights[:8],
+        "判读锚点": ["值符值使", "六合/玄武/白虎", "八门", "关键宫位"],
+    }
+
+
+def _raw_meihua_points(meihua: Dict[str, Any]) -> Dict[str, Any]:
+    if not meihua or meihua.get("错误"):
+        return {"可用": False, "错误": meihua.get("错误") if isinstance(meihua, dict) else "梅花盘缺失"}
+    return {
+        "可用": True,
+        "本卦": meihua.get("本卦", {}),
+        "互卦": meihua.get("互卦", {}),
+        "变卦": meihua.get("变卦", {}),
+        "动爻": meihua.get("动爻", ""),
+        "体用分析": meihua.get("体用分析", {}),
+        "判读锚点": ["本卦", "互卦", "变卦", "体用", "动爻"],
+    }
+
+
+def _raw_daliuren_points(dlr: Dict[str, Any]) -> Dict[str, Any]:
+    if not dlr:
+        return {"可用": False, "错误": "大六壬盘缺失"}
+    result = {"可用": True, "判读锚点": ["四课", "三传", "天将", "空亡", "行年"]}
+    for label in ("第一命主行年盘", "第二命主行年盘"):
+        pan = dlr.get(label) or {}
+        if not pan or pan.get("错误"):
+            result[label] = {"可用": False, "错误": pan.get("错误", "盘缺失") if isinstance(pan, dict) else "盘缺失"}
+            continue
+        chuan = pan.get("三传", {})
+        result[label] = {
+            "可用": True,
+            "日干支": pan.get("日干支", ""),
+            "时干支": pan.get("时干支", ""),
+            "起传法": chuan.get("起传法", ""),
+            "初传": chuan.get("初传", {}),
+            "中传": chuan.get("中传", {}),
+            "末传": chuan.get("末传", {}),
+            "空亡落传": (pan.get("神煞") or {}).get("空亡落传", []),
+            "本命": pan.get("本命", ""),
+            "行年": pan.get("行年", ""),
+        }
+    return result
+
+
+def _raw_compound_hex_points(compound_hex: Dict[str, Any]) -> Dict[str, Any]:
+    if not compound_hex:
+        return {"可用": False, "错误": "关系复合卦缺失"}
+    return {
+        "可用": True,
+        "本卦": compound_hex.get("本卦", {}),
+        "互卦": compound_hex.get("互卦", {}),
+        "变卦": compound_hex.get("变卦", {}),
+        "动爻": compound_hex.get("动爻", ""),
+        "体用分析": compound_hex.get("体用分析", {}),
+        "判读锚点": ["本卦", "互卦", "变卦", "体用", "动爻"],
+    }
+
+
+def _birth_fingerprint(first: Dict[str, Any], second: Dict[str, Any], q_dt: datetime, payload: Dict[str, Any]) -> str:
+    data = {
+        "first": {
+            "gender": first["性别"],
+            "birth": first["出生时间文本"],
+        },
+        "second": {
+            "gender": second["性别"],
+            "birth": second["出生时间文本"],
+        },
+        "question_time": q_dt.strftime("%Y-%m-%d %H:%M"),
+        "longitude": payload.get("longitude"),
+        "liuyao_nums": payload.get("liuyao_nums") or [],
+        "meihua_nums": payload.get("meihua_nums") or [],
+        "numbers": payload.get("numbers") or [],
+        "azimuth": payload.get("azimuth"),
+    }
+    raw = json.dumps(data, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
+
+
+def _pillars_brief(chart: Dict[str, Any]) -> str:
+    pillars = ((chart.get("八字") or {}).get("四柱") or {})
+    return " ".join(str(pillars.get(pos, "")) for pos in ("年柱", "月柱", "日柱", "时柱")).strip()
+
+
+def _palace_branch(chart: Dict[str, Any], palace: str) -> str:
+    ziwei = chart.get("紫微斗数") or {}
+    key = palace if palace.endswith("宫") else f"{palace}宫"
+    data = (ziwei.get("十二宫") or {}).get(key) or (ziwei.get("宫位详情") or {}).get(key) or {}
+    return str(data.get("地支", ""))
+
+
+def _build_change_diagnostics(
+    first: Dict[str, Any],
+    second: Dict[str, Any],
+    first_chart: Dict[str, Any],
+    second_chart: Dict[str, Any],
+    bazi_pair: Dict[str, Any],
+    ziwei_pair: Dict[str, Any],
+    current_question: Dict[str, Any],
+    compound_hex: Dict[str, Any],
+    q_dt: datetime,
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    return {
+        "请求指纹": _birth_fingerprint(first, second, q_dt, payload),
+        "第一命主": {
+            "性别": first["性别"],
+            "出生时间": first["出生时间文本"],
+            "四柱": _pillars_brief(first_chart),
+            "紫微命宫": _palace_branch(first_chart, "命"),
+            "紫微夫妻宫": _palace_branch(first_chart, "夫妻"),
+        },
+        "第二命主": {
+            "性别": second["性别"],
+            "出生时间": second["出生时间文本"],
+            "四柱": _pillars_brief(second_chart),
+            "紫微命宫": _palace_branch(second_chart, "命"),
+            "紫微夫妻宫": _palace_branch(second_chart, "夫妻"),
+        },
+        "随命主变化": {
+            "八字合盘日柱": next((row for row in bazi_pair.get("四柱对照", []) if row.get("柱位") == "日柱"), {}),
+            "紫微合盘评分": ziwei_pair.get("紫微合盘评分"),
+            "紫微互动线索": ziwei_pair.get("紫微互动线索", [])[:5],
+            "关系复合卦": {
+                "本卦": (compound_hex.get("本卦") or {}).get("卦名", ""),
+                "互卦": (compound_hex.get("互卦") or {}).get("卦名", ""),
+                "变卦": (compound_hex.get("变卦") or {}).get("卦名", ""),
+                "第二命主数": compound_hex.get("第二命主数"),
+            },
+            "大六壬第二行年": ((current_question.get("大六壬") or {}).get("第二命主行年盘") or {}).get("行年", ""),
+        },
+        "随起卦变化": {
+            "说明": "六爻、奇门、梅花默认是当前问事盘，主要随起卦时间、数字、方位和经度变化；只换第二命主生日时不必然变化。",
+            "六爻": (current_question.get("六爻") or {}).get("卦名", ""),
+            "奇门": f"{(current_question.get('奇门遁甲') or {}).get('遁型', '')}{(current_question.get('奇门遁甲') or {}).get('局数', '')}局",
+            "梅花": ((current_question.get("梅花易数") or {}).get("本卦") or {}).get("卦名", ""),
+        },
+    }
+
+
+def _build_raw_chart_points(
+    bazi_pair: Dict[str, Any],
+    ziwei_pair: Dict[str, Any],
+    current_question: Dict[str, Any],
+    compound_hex: Dict[str, Any],
+) -> Dict[str, Any]:
+    return {
+        "八字合盘": _raw_bazi_points(bazi_pair),
+        "紫微合盘": _raw_ziwei_points(ziwei_pair),
+        "六爻": _raw_liuyao_points(current_question.get("六爻") or {}),
+        "奇门遁甲": _raw_qimen_points(current_question.get("奇门遁甲") or {}),
+        "梅花易数": _raw_meihua_points(current_question.get("梅花易数") or {}),
+        "大六壬": _raw_daliuren_points(current_question.get("大六壬") or {}),
+        "关系复合卦": _raw_compound_hex_points(compound_hex),
+        "说明": "此字段是解读主依据。元解释器只用于任务调度和权重提示；若摘要与原始盘要点冲突，以本字段和完整排盘为准。",
+    }
+
+
 def _relation_from_charts(
     first: Dict[str, Any],
     second: Dict[str, Any],
     bazi_pair: Dict[str, Any],
+    ziwei_pair: Optional[Dict[str, Any]] = None,
     current_question: Optional[Dict[str, Any]] = None,
+    compound_hex: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     if bazi_pair.get("错误"):
         return {"细分": "盘面识别不足", "保守层级": "待判断", "置信度": 30, "证据": ["八字合盘不可用"]}
@@ -492,6 +1541,18 @@ def _relation_from_charts(
     evidence.extend(current_evidence)
     strong_identity_anchors += current_anchors
 
+    ziwei_scores, ziwei_evidence, ziwei_anchors = _ziwei_relation_signals(ziwei_pair)
+    for key, value in ziwei_scores.items():
+        scores[key] += value
+    evidence.extend(ziwei_evidence)
+    strong_identity_anchors += ziwei_anchors
+
+    compound_scores, compound_evidence, compound_anchors = _compound_relation_signals(compound_hex)
+    for key, value in compound_scores.items():
+        scores[key] += value
+    evidence.extend(compound_evidence)
+    strong_identity_anchors += compound_anchors
+
     top_key, top_score = max(scores.items(), key=lambda kv: kv[1])
     confidence = min(62, 42 + top_score)
     descriptions = {
@@ -531,10 +1592,12 @@ def _relation_identification(
     first: Dict[str, Any],
     second: Dict[str, Any],
     bazi_pair: Dict[str, Any],
+    ziwei_pair: Optional[Dict[str, Any]] = None,
     current_question: Optional[Dict[str, Any]] = None,
+    compound_hex: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     semantic = _relation_from_question(question, first, second)
-    chart = _relation_from_charts(first, second, bazi_pair, current_question)
+    chart = _relation_from_charts(first, second, bazi_pair, ziwei_pair, current_question, compound_hex)
     declared = _declared_relation_text(declared_relation)
 
     if declared != "未提供":
@@ -734,20 +1797,50 @@ def relationship_divination(payload: Dict[str, Any]) -> Dict[str, Any]:
         },
     }
 
-    identification = _relation_identification(question, declared_relation, first, second, bazi_pair, current_question)
-    logger.info(
-        "REL identify selected=%s layer=%s scores=%s",
-        identification.get("细粒度推断"),
-        identification.get("主要来源"),
-        (identification.get("盘面识别倾向") or {}).get("候选评分", {}),
-    )
-
     compound_hex = _relationship_hexagram(
         first,
         second,
         q_dt,
         numbers=[*liuyao_nums, *meihua_nums, *compound_nums],
         azimuth=azimuth_val,
+    )
+    identification = _relation_identification(
+        question,
+        declared_relation,
+        first,
+        second,
+        bazi_pair,
+        ziwei_pair,
+        current_question,
+        compound_hex,
+    )
+    logger.info(
+        "REL identify selected=%s layer=%s scores=%s",
+        identification.get("细粒度推断"),
+        identification.get("主要来源"),
+        (identification.get("盘面识别倾向") or {}).get("候选评分", {}),
+    )
+    meta_interpreter = _build_relationship_meta_interpreter(
+        question,
+        declared_relation,
+        bazi_pair,
+        ziwei_pair,
+        current_question,
+        compound_hex,
+        identification,
+    )
+    raw_chart_points = _build_raw_chart_points(bazi_pair, ziwei_pair, current_question, compound_hex)
+    change_diagnostics = _build_change_diagnostics(
+        first,
+        second,
+        first_chart,
+        second_chart,
+        bazi_pair,
+        ziwei_pair,
+        current_question,
+        compound_hex,
+        q_dt,
+        payload,
     )
     high_risk = _detect_high_risk(question)
 
@@ -767,68 +1860,147 @@ def relationship_divination(payload: Dict[str, Any]) -> Dict[str, Any]:
             "紫微合盘": ziwei_pair,
         },
         "关系识别盘": identification,
+        "元解释器": meta_interpreter,
+        "原始盘要点": raw_chart_points,
+        "排盘变化校验": change_diagnostics,
         "当前问事盘": current_question,
         "关系复合卦": compound_hex,
         "综合验证": {
             "高风险主题": high_risk,
             "合参顺序": [
-                "先看用户声明与问题语义，确认是否已有现实关系前提",
-                "再看两位个体命盘，判断长期结构",
-                "再看八字合盘与紫微合盘，判断关系底层牵引",
-                "再看六爻、奇门、梅花、大六壬，判断当前互动状态",
-                "最后用关系复合卦作为双人关系场的校验",
+                "先读取原始盘面，确认八字、紫微、六爻、奇门、梅花、大六壬、关系复合卦的实际字段",
+                "再由元解释器识别关系子任务与语义主轴，并给出动态权重",
+                "再按任务权重决定六术在本题中的主辅地位",
+                "各术数只在自身擅长层面给出语义标签；若摘要与原盘冲突，以原盘为准",
+                "最后把当前状态、长期结构、动态趋势、底层因果分层汇总",
+                "关系复合卦作为双人关系场的补充校验",
             ],
             "免责声明": "所有结论均为民俗术数研究与娱乐参考，不能替代现实证据、亲子鉴定、医疗诊断、法律意见或其他专业判断。",
         },
     }
 
 
-def generate_relationship_prompt(compound_result: Dict[str, Any]) -> str:
+
+def _format_method_signals(meta):
+    """Extract the key signals from each method into concise text lines for the prompt."""
+    semantics = meta.get("各术数语义标签", {})
+    method_order = ["六爻", "八字", "紫微", "奇门", "梅花", "大六壬", "关系复合卦"]
+    lines = []
+    for method in method_order:
+        info = semantics.get(method, {})
+        labels = info.get("标签", [])
+        if not labels:
+            lines.append(f"{method}：盘面不可用或信号不集中")
+            continue
+        top = sorted(labels, key=lambda s: s.get("强度", 0), reverse=True)[:3]
+        parts = [f"{s['标签']}({s['方向']})" for s in top]
+        lines.append(f"{method}：{' / '.join(parts)}")
+    return "\n".join(lines)
+
+def generate_relationship_prompt(compound_result):
     result_text = json.dumps(compound_result, ensure_ascii=False, indent=2, default=str)
-    question = compound_result.get("问题", "")
-    relation = compound_result.get("关系识别盘", {})
-    risk = compound_result.get("综合验证", {}).get("高风险主题", {})
-    return f"""你是一位严谨、克制的传统术数关系合盘分析顾问。本次只使用专家模式：必须逐项分析，但不要把术数象意说成现实事实。
+    question = compound_result.get('问题', '')
+    meta = compound_result.get('元解释器', {})
+    raw_points = compound_result.get('原始盘要点', {})
+    risk = compound_result.get('综合验证', {}).get('高风险主题', {})
+    task = meta.get('问题识别', {})
+    user_conc = meta.get('用户结论', {})
+    layers = meta.get('任务语义汇总', {})
 
-# 用户问题
-{question}
+    top_relation = user_conc.get('最像关系', {})
+    ranking = user_conc.get('候选关系排行', [])
+    not_like = user_conc.get('不像关系', [])
+    direct_answer = user_conc.get('直接回答', '')
+    current_state = user_conc.get('当前状态', '')
+    stability = user_conc.get('长期稳定性', '')
+    trend = user_conc.get('发展趋势', '')
 
-# 关系识别摘要
-{json.dumps(relation, ensure_ascii=False, indent=2, default=str)}
+    ranking_text = ''
+    if ranking:
+        ranking_lines = []
+        for i, r in enumerate(ranking[:3]):
+            evidence_text = '；'.join(r.get('依据', [])[:2])
+            ranking_lines.append(
+                '  %d. %s（%s，强度%s）—— %s' % (i + 1, r['类型'], r['等级'], r['强度'], evidence_text)
+            )
+        ranking_text = '\n'.join(ranking_lines)
 
-# 风险边界
-{json.dumps(risk, ensure_ascii=False, indent=2, default=str)}
+    layer_text = ''
+    for layer_name in ['事实层', '关系性质层', '结构稳定层', '动态行为层', '趋势概率层', '底层因果层']:
+        l = layers.get(layer_name, {})
+        tags = '、'.join(l.get('主要标签', [])[:3]) or '信号不集中'
+        layer_text += '  %s：%s\n' % (layer_name, tags)
 
-硬性规则：
-1. 关系识别采用弱描述策略。用户未声明现实关系时，必须描述关系象，不要直接断言“就是夫妻/情人/同事/亲子”等现实身份。
-2. 只有当用户明确声明关系，或多个独立盘面给出极强且一致的身份锚点时，才可说“较可能为某类关系”；仍需注明“术数倾向，不是现实证明”。
-3. 六爻财官、奇门六合、天后、姤卦、咸卦、归妹、家人等都只能作为关系象或亲密象，不能单独作为夫妻、婚外情或法律婚姻证明。
-4. 涉及亲生/血缘/医疗/法律/投资时，必须提示以正规鉴定、专业机构或现实证据为准。
-5. 不输出思考过程，不输出英文段落；使用简体中文。
+    risk_hits = risk.get('命中类别', [])
+    risk_note = ''
+    if risk_hits:
+        risk_note = '⚠ 本问题涉及' + '、'.join(risk_hits) + '，需提示用户以现实证据为准。'
 
-# 完整排盘数据
-{result_text}
+    not_like_text = '、'.join(not_like) if not_like else '无明显排除项'
+    task_name = task.get('任务名称', '')
+    task_desc = task.get('任务说明', '')
+    top_type = top_relation.get('类型', '')
+    top_level = top_relation.get('等级', '')
+    top_strength = top_relation.get('强度', '')
 
-# 必须按以下章节输出
-1. 【问题与关系识别】
-2. 【第一命主个体盘】
-3. 【第二命主个体盘】
-4. 【八字合盘】
-5. 【紫微合盘】
-6. 【关系识别盘】
-7. 【当前问事盘：六爻】
-8. 【当前问事盘：奇门遁甲】
-9. 【当前问事盘：梅花易数】
-10. 【当前问事盘：大六壬】
-11. 【关系复合卦】
-12. 【交叉验证】
-13. 【最终判断】
-14. 【置信度】
-15. 【行动建议】
-
-最终判断必须直接回答用户问题，但在关系未声明时，优先给出“关系画像/互动状态”，不要过度身份断言。"""
-
-
+    prompt = '你是一位传统术数关系合盘解读助手。请做全息解盘：先从八字、紫微、六爻、奇门、梅花、大六壬、关系复合卦逐层展开，最后再给综合结论。\n'
+    prompt += '\n'
+    prompt += '# 用户问题\n'
+    prompt += question + '\n'
+    prompt += '\n'
+    prompt += '# 系统任务摘要（只作导航，必须用原始盘核验）\n'
+    prompt += '问题类型：' + task_name + '（' + task_desc + '）\n'
+    prompt += '关系判断：' + top_type + '（可信度等级：' + top_level + '，强度：' + str(top_strength) + '）\n'
+    prompt += '不像关系：' + not_like_text + '\n'
+    prompt += '直接回答：' + direct_answer + '\n'
+    prompt += '当前状态：' + current_state + '\n'
+    prompt += '长期稳定性：' + stability + '\n'
+    prompt += '发展趋势：' + trend + '\n'
+    prompt += '注意：以上摘要不是最终判词。若换第二命主后八字、紫微、复合卦、大六壬行年出现差异，必须围绕这些差异重判，不得套用上一盘或固定模板。\n'
+    prompt += '\n'
+    prompt += '# 原始盘要点（解读主依据，必须优先读取）\n'
+    prompt += json.dumps(raw_points, ensure_ascii=False, indent=2, default=str) + '\n'
+    prompt += '\n'
+    prompt += '# 候选关系排行\n'
+    prompt += ranking_text + '\n'
+    prompt += '\n'
+    prompt += '# 六层语义标签\n'
+    prompt += layer_text
+    prompt += '\n'
+    prompt += '# 各术数关键信号\n'
+    prompt += _format_method_signals(meta) + '\n'
+    prompt += '\n'
+    prompt += '# 完整排盘数据\n'
+    prompt += result_text + '\n'
+    prompt += '\n'
+    prompt += risk_note + '\n'
+    prompt += '\n'
+    prompt += '# 硬性规则\n'
+    prompt += '1. 不要开头先给最终结论；先逐盘解读，最后集中给综合结论。\n'
+    prompt += '2. 原始盘要点和完整排盘是最高优先级；元解释器只作任务调度和权重参考，不能压过原始盘差异。\n'
+    prompt += '3. 如果元解释器摘要与原始排盘冲突，必须以原始排盘为准，并说明“按原盘看应修正为……”。\n'
+    prompt += '4. 禁止编造原盘没有的字段：不得写错四柱、日主、卦名、世应、动爻、三传、复合卦。\n'
+    prompt += '5. 未声明现实关系时，只能说“盘面关系画像”，不能证明现实身份；但也不能反向否定现实身份，例如不能写“不是夫妻/不是公开伴侣”。\n'
+    prompt += '6. 每一行结论最多给两个判断，不要一串标签。\n'
+    prompt += '7. 八字、紫微、六爻、奇门、梅花、大六壬、关系复合卦都要单独成段分析。\n'
+    prompt += '8. 专业术语可以出现，但每个术语后要翻译成人话。\n'
+    prompt += '9. 如果短期状态与长期结构不一致，直接说“当前如何、长期如何”，不要和稀泥。\n'
+    prompt += '10. 输出要信息充分，建议 1200-2000 字；不要只写三小段。\n'
+    prompt += '11. 六爻、奇门、梅花属于当前问事盘；只换第二命主生日时，它们不变不能证明两段关系一样。关系性质必须重点核验八字合盘、紫微合盘、关系复合卦和大六壬第二命主行年。\n'
+    prompt += '\n'
+    prompt += '# 输出\n'
+    prompt += '【问题识别】简要说明本题问的是什么，不超过两行\n'
+    prompt += '【八字合盘】长期结构、冲合刑害、稳定性\n'
+    prompt += '【紫微合盘】命宫/夫妻宫牵动、人生结构和关系质量\n'
+    prompt += '【六爻】当前事实状态、谁主动、谁保留、关系是否有变化\n'
+    prompt += '【奇门遁甲】行为路径、阻力、暗线、主动被动\n'
+    prompt += '【梅花易数】趋势概率、关系是否向合或需变革\n'
+    prompt += '【大六壬】过程因果、起因-发展-结果链条\n'
+    prompt += '【关系复合卦】双人关系场校验\n'
+    prompt += '【综合验证】把各术数合在一起，说明哪些是主象、哪些是辅象、哪些是风险\n'
+    prompt += '【最终结论】最后再直接回答用户问题：主关系、当前状态、长期稳定性、趋势\n'
+    prompt += '【建议】给 3-5 条具体建议\n'
+    return prompt
 def build_relationship_messages(
     compound_result: Dict[str, Any],
     system_prompt: str = "",

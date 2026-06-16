@@ -186,12 +186,29 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);border:1px s
       </div>
     </div>
     <div class="card">
+      <div class="card-title"><span>关系结论</span></div>
+      <div class="card-body">
+        <div class="result-grid">
+          <div class="mini" id="conclusionResult"></div>
+          <div class="mini" id="rankingResult"></div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title"><span>排盘变化校验</span></div>
+      <div class="card-body"><div class="result-grid" id="changeResult"></div></div>
+    </div>
+    <div class="card">
       <div class="card-title"><span>两位命主个体盘</span></div>
       <div class="card-body"><div class="result-grid"><div class="mini" id="firstResult"></div><div class="mini" id="secondResult"></div></div></div>
     </div>
     <div class="card">
       <div class="card-title"><span>双人合盘与复合卦</span></div>
       <div class="card-body"><div class="result-grid"><div class="mini" id="pairResult"></div><div class="mini" id="compoundResult"></div></div></div>
+    </div>
+    <div class="card">
+      <div class="card-title"><span>动态权重与关键原盘</span></div>
+      <div class="card-body"><div class="result-grid" id="rawPointResult"></div></div>
     </div>
     <div class="card">
       <div class="card-title"><span>当前问事盘</span></div>
@@ -271,7 +288,20 @@ function buildRequest(){
   }catch(e){toast(e.message);return null}
 }
 
-let lastRequest=null,lastResult=null,lastAiText='',roles=[],selectedRoleId=null;
+let lastRequest=null,lastRequestKey='',formDirty=false,lastResult=null,lastAiText='',roles=[],selectedRoleId=null;
+function stableStringify(value){
+  if(value===null||typeof value!=='object')return JSON.stringify(value);
+  if(Array.isArray(value))return '['+value.map(stableStringify).join(',')+']';
+  return '{'+Object.keys(value).sort().map(k=>JSON.stringify(k)+':'+stableStringify(value[k])).join(',')+'}';
+}
+function requestKey(req){return stableStringify(req)}
+function markFormDirty(){
+  if(!lastRequest)return;
+  formDirty=true;
+  const btn=$('btnInterpret');
+  if(btn)btn.textContent='需重新起盘后解读';
+  if($('aiResult'))$('aiResult').innerHTML='表单已修改，请先重新起关系复合盘。';
+}
 function sleep(ms){return new Promise(resolve=>setTimeout(resolve,ms))}
 async function readError(res){try{const d=await res.json();return d.detail||d.error||JSON.stringify(d)}catch(_){return await res.text()}}
 async function fetchJsonWithRetry(url,options={},retries=3){
@@ -351,6 +381,126 @@ function renderPair(pair,zw){
   html+=(zw['紫微互动线索']||[]).map(x=>`<div class="tag">${escapeHTML(x)}</div>`).join('');
   return html;
 }
+function renderMeta(meta){
+  const task=meta['问题识别']||{},schedule=meta['权重调度']||{},layers=meta['任务语义汇总']||{},final=meta['综合断语']||{},user=meta['用户结论']||{};
+  const top=user['最像关系']||{};
+  const notLike=(user['不像关系']||[]).join('、')||'暂无明显排除项';
+  $('conclusionResult').innerHTML='<h3>直接结论</h3>'+kvHtml([
+    ['一句话',user['一句话结论']||final['主关系定义']||''],
+    ['直接回答',user['直接回答']||''],
+    ['最像关系',`${top['类型']||''} ${top['等级']||''}`],
+    ['不像',notLike],
+    ['当前状态',user['当前状态']||''],
+    ['长期稳定',user['长期稳定性']||''],
+    ['发展趋势',user['发展趋势']||'']
+  ]);
+  const ranking=(user['候选关系排行']||[]).map(x=>{
+    const reason=(x['依据']||[]).join('；');
+    return `<div style="margin-bottom:8px"><span class="tag gold">${escapeHTML(x['类型'])}</span><span class="tag">${escapeHTML(x['等级'])} ${escapeHTML(x['强度'])}</span><div style="font-size:.82rem;color:var(--text-dim)">${escapeHTML(reason)}</div></div>`;
+  }).join('')||'<div class="tag">暂无排行</div>';
+  const weights=(schedule['权重表']||[]).map(x=>`<span class="tag gold">${escapeHTML(x['术数'])} ${escapeHTML(x['权重'])}%</span>`).join('');
+  const layerNames=['事实层','关系性质层','结构稳定层','动态行为层','趋势概率层','底层因果层'];
+  let html='<h3>候选关系排行</h3>'+ranking;
+  html+='<details><summary>问题识别、权重与分层标签</summary>';
+  html+='<h3 style="margin-top:10px">问题识别</h3>'+kvHtml([
+    ['任务类型',task['任务名称']||task['primary_task']||''],
+    ['语义主轴',(task['语义主轴']||[]).join(' / ')],
+    ['时间轴',task['time_axis']||'']
+  ])+`<div style="margin-top:8px">${weights}</div>`;
+  html+='<h3 style="margin-top:10px">分层标签</h3>';
+  html+=layerNames.map(name=>{
+    const l=layers[name]||{};
+    const tags=(l['主要标签']||[]).map(x=>`<span class="tag gold">${escapeHTML(x)}</span>`).join('')||'<span class="tag">信号不集中</span>';
+    return `<div style="margin-bottom:8px"><div style="color:var(--text-dim);font-size:.8rem">${escapeHTML(name)}</div><div>${tags}</div><div style="font-size:.82rem;color:var(--text-dim)">${escapeHTML(l['解释']||'')}</div></div>`;
+  }).join('');
+  html+='</details>';
+  $('rankingResult').innerHTML=html;
+}
+function renderRawPoints(raw,meta){
+  const schedule=meta['权重调度']||{};
+  const weights=(schedule['权重表']||[]).map(x=>`<span class="tag gold">${escapeHTML(x['术数'])} ${escapeHTML(x['权重'])}%</span>`).join('');
+  const ly=raw['六爻']||{},bz=raw['八字合盘']||{},zw=raw['紫微合盘']||{},qm=raw['奇门遁甲']||{},mh=raw['梅花易数']||{},dlr=raw['大六壬']||{},cg=raw['关系复合卦']||{};
+  const cards=[];
+  cards.push(`<div class="mini"><h3>动态权重</h3><div>${weights||'<span class="tag">暂无</span>'}</div><div style="font-size:.82rem;color:var(--text-dim);margin-top:8px">${escapeHTML(schedule['原则']||'')}</div></div>`);
+  cards.push(`<div class="mini"><h3>六爻要点</h3>${kvHtml([
+    ['卦名',`${ly['卦名']||''} ${ly['宫属']||''}`],
+    ['世爻',ly['世爻']||''],
+    ['应爻',ly['应爻']||''],
+    ['动爻',(ly['动爻']||[]).join('；')],
+    ['旬空',(ly['旬空']||[]).join('、')],
+    ['落空爻',(ly['落空爻']||[]).join('；')]
+  ])}</div>`);
+  cards.push(`<div class="mini"><h3>八字合盘要点</h3>${kvHtml([
+    ['张力',`${bz['关系张力等级']||''} ${bz['关系张力评分']||''}`],
+    ['日主关系',bz['日主关系']?.['五行关系']||''],
+    ['A看B',bz['日主关系']?.['第二命主对第一命主十神']||''],
+    ['B看A',bz['日主关系']?.['第一命主对第二命主十神']||'']
+  ])}${(bz['四柱对照']||[]).map(x=>`<div class="tag">${escapeHTML(x['柱位'])}: ${escapeHTML((x['关系']||[]).join('、'))}</div>`).join('')}</div>`);
+  cards.push(`<div class="mini"><h3>紫微合盘要点</h3>${kvHtml([
+    ['评分',`${zw['紫微合盘等级']||''} ${zw['紫微合盘评分']||''}`],
+    ['A命宫',zw['第一命主命宫']?.['地支']||''],
+    ['A夫妻',zw['第一命主夫妻宫']?.['地支']||''],
+    ['B命宫',zw['第二命主命宫']?.['地支']||''],
+    ['B夫妻',zw['第二命主夫妻宫']?.['地支']||'']
+  ])}${(zw['互动线索']||[]).map(x=>`<div class="tag">${escapeHTML(x)}</div>`).join('')}</div>`);
+  cards.push(`<div class="mini"><h3>奇门要点</h3>${kvHtml([
+    ['局',`${qm['遁型']||''}${qm['局数']||''}局`],
+    ['值符',qm['值符星']||''],
+    ['值使',qm['值使门']||''],
+    ['旬空',(qm['旬空']||[]).join('、')]
+  ])}${(qm['关键宫']||[]).map(x=>`<div class="tag">${escapeHTML(x['宫'])}宫 ${escapeHTML(x['方位'])} ${escapeHTML(x['八门'])}/${escapeHTML(x['八神'])}/${escapeHTML(x['九星'])}</div>`).join('')}</div>`);
+  cards.push(`<div class="mini"><h3>梅花要点</h3>${kvHtml([
+    ['本卦',mh['本卦']?.['卦名']||''],
+    ['互卦',mh['互卦']?.['卦名']||''],
+    ['变卦',mh['变卦']?.['卦名']||''],
+    ['动爻',mh['动爻']||''],
+    ['体用',`${mh['体用分析']?.['体用关系']||''} ${mh['体用分析']?.['断语']||''}`]
+  ])}</div>`);
+  function dlrBrief(label){
+    const p=dlr[label]||{};
+    return `${label.replace('行年盘','')}：${p['起传法']||''} 初${p['初传']?.['干支']||''}${p['初传']?.['天将']||''} 中${p['中传']?.['干支']||''}${p['中传']?.['天将']||''} 末${p['末传']?.['干支']||''}${p['末传']?.['天将']||''}`;
+  }
+  cards.push(`<div class="mini"><h3>大六壬要点</h3><div>${escapeHTML(dlrBrief('第一命主行年盘'))}</div><div>${escapeHTML(dlrBrief('第二命主行年盘'))}</div></div>`);
+  cards.push(`<div class="mini"><h3>复合卦要点</h3>${kvHtml([
+    ['本卦',cg['本卦']?.['卦名']||''],
+    ['互卦',cg['互卦']?.['卦名']||''],
+    ['变卦',cg['变卦']?.['卦名']||''],
+    ['动爻',cg['动爻']||''],
+    ['体用',`${cg['体用分析']?.['体用关系']||''} ${cg['体用分析']?.['断语']||''}`]
+  ])}</div>`);
+  $('rawPointResult').innerHTML=cards.join('');
+}
+function renderChangeDiagnostics(change){
+  if(!change||!Object.keys(change).length){$('changeResult').innerHTML='<div class="mini"><h3>变化校验</h3><div>暂无校验数据</div></div>';return}
+  const a=change['第一命主']||{},b=change['第二命主']||{},bySubject=change['随命主变化']||{},byQuestion=change['随起卦变化']||{};
+  const day=bySubject['八字合盘日柱']||{},cg=bySubject['关系复合卦']||{};
+  const zwLines=(bySubject['紫微互动线索']||[]).map(x=>`<div class="tag">${escapeHTML(x)}</div>`).join('')||'<span class="tag">暂无强线索</span>';
+  const cards=[];
+  cards.push(`<div class="mini"><h3>请求指纹</h3>${kvHtml([
+    ['指纹',change['请求指纹']||''],
+    ['用途','确认本次起盘是否已换输入']
+  ])}</div>`);
+  cards.push(`<div class="mini"><h3>两位命主</h3>${kvHtml([
+    ['第一',`${a['性别']||''} ${a['出生时间']||''}`],
+    ['A四柱',a['四柱']||''],
+    ['第二',`${b['性别']||''} ${b['出生时间']||''}`],
+    ['B四柱',b['四柱']||'']
+  ])}</div>`);
+  cards.push(`<div class="mini"><h3>随命主变化</h3>${kvHtml([
+    ['日柱',`${day['第一命主']||''} vs ${day['第二命主']||''}`],
+    ['日柱关系',[...(day['天干关系']||[]),...(day['地支关系']||[])].join('、')],
+    ['紫微评分',bySubject['紫微合盘评分']??''],
+    ['复合卦',`${cg['本卦']||''} → ${cg['变卦']||''}`],
+    ['第二命主数',cg['第二命主数']??''],
+    ['大六壬B行年',bySubject['大六壬第二行年']||'']
+  ])}<div style="margin-top:6px">${zwLines}</div></div>`);
+  cards.push(`<div class="mini"><h3>随起卦变化</h3>${kvHtml([
+    ['六爻',byQuestion['六爻']||''],
+    ['奇门',byQuestion['奇门']||''],
+    ['梅花',byQuestion['梅花']||'']
+  ])}<div style="font-size:.82rem;color:var(--text-dim);margin-top:8px">${escapeHTML(byQuestion['说明']||'')}</div></div>`);
+  $('changeResult').innerHTML=cards.join('');
+}
 function renderCurrent(cur){
   const dlr=cur['大六壬']||{};
   const rows=[
@@ -368,6 +518,9 @@ function renderResults(data){
   const st=data['时空坐标']||{},rel=data['关系识别盘']||{};
   $('basicResult').innerHTML='<h3>基础信息</h3>'+kvHtml([['问题',data['问题']||''],['用户声明关系',data['用户声明关系']||''],['起卦时间',st['起卦时间']||''],['经纬度',`${st['经度']||''}, ${st['纬度']||''}`]]);
   $('relationResult').innerHTML='<h3>关系识别盘</h3>'+kvHtml([['关系描述',rel['关系描述']||rel['细粒度推断']||''],['保守层级',rel['保守层级']||''],['主要来源',rel['主要来源']||''],['一致性',rel['一致性']||'']]);
+  renderMeta(data['元解释器']||{});
+  renderChangeDiagnostics(data['排盘变化校验']||{});
+  renderRawPoints(data['原始盘要点']||{},data['元解释器']||{});
   $('firstResult').innerHTML=renderSubject(data['第一命主']||{},'第一命主');
   $('secondResult').innerHTML=renderSubject(data['第二命主']||{},'第二命主');
   const pair=data['双人本命合盘']||{};
@@ -382,11 +535,14 @@ function renderResults(data){
 async function doDivine(){
   const req=buildRequest();if(!req)return;
   lastRequest=req;
+  lastRequestKey=requestKey(req);
+  formDirty=false;
   const btn=$('btnDivine');btn.disabled=true;btn.textContent='起盘中...';
   try{
     const data=await apiPostJson('/api/relationship/divine',req);
     lastResult=data;
     renderResults(data);
+    $('btnInterpret').textContent='专家解读';
   }catch(e){toast('起盘失败：'+e.message)}
   finally{btn.disabled=false;btn.textContent='起关系复合盘'}
 }
@@ -416,6 +572,8 @@ async function streamSSE(url,body,el){
 }
 async function doInterpret(){
   if(!lastRequest){toast('请先起盘');return}
+  const currentReq=buildRequest();if(!currentReq)return;
+  if(formDirty||requestKey(currentReq)!==lastRequestKey){toast('表单已修改，请先重新起盘');return}
   if(!selectedRoleId){toast('请先选择角色');return}
   const btn=$('btnInterpret');btn.disabled=true;btn.textContent='解读中...';
   try{
@@ -436,6 +594,8 @@ window.addEventListener('DOMContentLoaded',()=>{
   refreshTime();
   loadRoles();
   initGeoLocation();
+  document.querySelectorAll('input,select,textarea').forEach(el=>el.addEventListener('input',markFormDirty));
+  document.querySelectorAll('select').forEach(el=>el.addEventListener('change',markFormDirty));
 });
 </script>
 </body>
