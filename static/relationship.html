@@ -286,6 +286,9 @@ function subject(prefix){
   const d=splitDate(prefix+'_date'),t=splitTime(prefix+'_time');
   return {gender:$(prefix+'_gender').value,birth_year:d.y,birth_month:d.m,birth_day:d.d,birth_hour:t.h,birth_minute:t.m}
 }
+function subjectKeyFromForm(){
+  try{return stableStringify({a:subject('a'),b:subject('b')})}catch(_){return ''}
+}
 function buildRequest(){
   try{
     const qd=splitDate('q_date'),qt=splitTime('q_time');
@@ -310,7 +313,7 @@ function buildRequest(){
   }catch(e){toast(e.message);return null}
 }
 
-let lastRequest=null,lastRequestKey='',formDirty=false,lastResult=null,lastAiText='',lastFollowupText='',followupHistory=[],roles=[],selectedRoleId=null;
+let lastRequest=null,lastRequestKey='',lastSubjectKey='',formDirty=false,lastResult=null,lastAiText='',lastFollowupText='',followupHistory=[],roles=[],selectedRoleId=null,activeStreamController=null;
 function stableStringify(value){
   if(value===null||typeof value!=='object')return JSON.stringify(value);
   if(Array.isArray(value))return '['+value.map(stableStringify).join(',')+']';
@@ -324,6 +327,19 @@ function markFormDirty(){
   const btn=$('btnInterpret');
   if(btn)btn.textContent='需重新起盘后解读';
   if($('aiResult'))$('aiResult').innerHTML='表单已修改，请先重新起关系复合盘。';
+}
+function resetStaleContextForSubjectChange(){
+  if(!lastSubjectKey)return;
+  const current=subjectKeyFromForm();
+  if(!current||current===lastSubjectKey)return;
+  if($('context').value.trim()||$('relation_type').value){
+    $('context').value='';
+    $('relation_type').value='';
+    toast('命主已变化，已清空上一盘补充事实和声明关系');
+  }
+  $('followupMessage').value='';
+  followupHistory=[];
+  lastFollowupText='';
 }
 function useFollowupQuestion(index){
   const item=(window.relationshipFollowups||[])[index]||{};
@@ -580,9 +596,12 @@ function renderResults(data){
   $('resultArea').scrollIntoView({behavior:'smooth'});
 }
 async function doDivine(){
+  if(activeStreamController){activeStreamController.abort();activeStreamController=null}
+  resetStaleContextForSubjectChange();
   const req=buildRequest();if(!req)return;
   lastRequest=req;
   lastRequestKey=requestKey(req);
+  lastSubjectKey=subjectKeyFromForm();
   formDirty=false;
   const btn=$('btnDivine');btn.disabled=true;btn.textContent='起盘中...';
   try{
@@ -594,7 +613,10 @@ async function doDivine(){
   finally{btn.disabled=false;btn.textContent='起关系复合盘'}
 }
 async function streamSSE(url,body,el,options={}){
-  const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(activeStreamController)activeStreamController.abort();
+  const controller=new AbortController();
+  activeStreamController=controller;
+  const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:controller.signal});
   if(!res.ok)throw new Error(await readError(res));
   const reader=res.body.getReader();
   const decoder=new TextDecoder('utf-8');
@@ -623,6 +645,7 @@ async function streamSSE(url,body,el,options={}){
         const shown=prefixText+text;
         if(updateLastAiText)lastAiText=shown;
         el.innerHTML=renderMarkdown(shown);
+        if(activeStreamController===controller)activeStreamController=null;
         return text;
       }
     }
@@ -630,6 +653,7 @@ async function streamSSE(url,body,el,options={}){
   const shown=prefixText+text;
   if(updateLastAiText)lastAiText=shown;
   el.innerHTML=renderMarkdown(shown);
+  if(activeStreamController===controller)activeStreamController=null;
   return text;
 }
 async function doInterpret(){

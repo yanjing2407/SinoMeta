@@ -391,6 +391,48 @@ def test_relationship_parent_child_prior_suppresses_romance():
     print("PASS: test_relationship_parent_child_prior_suppresses_romance")
 
 
+def test_relationship_stale_child_context_conflict():
+    from relationship import relationship_divination
+
+    payload = {
+        "event": "算算两个命主什么关系",
+        "context": "这是我和儿子",
+        "relation_type": "",
+        "first_subject": {
+            "gender": "男",
+            "birth_year": 1982,
+            "birth_month": 11,
+            "birth_day": 12,
+            "birth_hour": 13,
+            "birth_minute": 15,
+        },
+        "second_subject": {
+            "gender": "女",
+            "birth_year": 1990,
+            "birth_month": 8,
+            "birth_day": 15,
+            "birth_hour": 1,
+            "birth_minute": 0,
+        },
+        "year": 2026,
+        "month": 6,
+        "day": 16,
+        "hour": 6,
+        "minute": 54,
+        "longitude": 118.024093,
+        "latitude": 36.814259,
+    }
+    result = relationship_divination(payload)
+    relation = result["关系识别盘"]
+    prior = result["元解释器"]["关系先验"]
+
+    assert prior["声明亲子"] is False
+    assert prior["上下文冲突"]
+    assert "上下文" in relation["主要来源"]
+    assert "残留" in relation["关系描述"]
+    print("PASS: test_relationship_stale_child_context_conflict")
+
+
 def test_relationship_followup_contract_reuses_chart():
     from pathlib import Path
 
@@ -906,6 +948,7 @@ if __name__ == '__main__':
     test_relationship_divination_weak_description()
     test_relationship_second_subject_change_diagnostics()
     test_relationship_parent_child_prior_suppresses_romance()
+    test_relationship_stale_child_context_conflict()
     test_relationship_followup_contract_reuses_chart()
     test_sqlite_busy_timeout()
     test_jie_qi_month()

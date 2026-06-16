@@ -128,10 +128,11 @@ def _demographic_prior(first: Dict[str, Any], second: Dict[str, Any], context: s
     age_diff = abs((first["出生时间"] - second["出生时间"]).days) / 365.2425
     same_gender = first["性别"] == second["性别"]
     text = context or ""
+    context_conflicts = _gendered_relation_conflicts(first, second, text)
     parent_child_words = ["父子", "父女", "母子", "母女", "儿子", "女儿", "孩子", "亲子", "血缘", "父亲", "母亲", "爸爸", "妈妈"]
     partner_words = ["夫妻", "婚恋", "婚姻", "姻缘", "老婆", "老公", "对象", "恋人", "情侣", "男友", "女友", "情人", "暧昧", "伴侣"]
     care_words = ["照顾", "抚养", "监护", "长辈", "晚辈", "赡养", "养育"]
-    declared_parent_child = any(word in text for word in parent_child_words)
+    declared_parent_child = any(word in text for word in parent_child_words) and not context_conflicts
     declared_partner = any(word in text for word in partner_words)
     declared_care = any(word in text for word in care_words)
     long_gap = age_diff >= 18
@@ -148,6 +149,8 @@ def _demographic_prior(first: Dict[str, Any], second: Dict[str, Any], context: s
         notes.append("双方同性；未声明婚恋时，妻财/官鬼不优先翻译为恋爱对象。")
     if declared_parent_child:
         notes.append("补充信息已声明亲子/父母子女语境。")
+    if context_conflicts:
+        notes.extend(context_conflicts)
     if declared_partner:
         notes.append("补充信息已声明伴侣/婚恋语境。")
     return {
@@ -161,12 +164,27 @@ def _demographic_prior(first: Dict[str, Any], second: Dict[str, Any], context: s
         "允许婚恋优先": partner_allowed,
         "压制婚恋暧昧": partner_suppressed,
         "提升照护长幼": care_boost,
+        "上下文冲突": context_conflicts,
         "说明": notes,
     }
 
 
 def _prior_suppresses_partner(prior: Optional[Dict[str, Any]]) -> bool:
     return bool(prior and prior.get("压制婚恋暧昧") and not prior.get("声明伴侣"))
+
+
+def _gendered_relation_conflicts(first: Dict[str, Any], second: Dict[str, Any], text: str) -> List[str]:
+    text = text or ""
+    if not text:
+        return []
+    _, younger = (first, second) if first["出生时间"] < second["出生时间"] else (second, first)
+    younger_gender = younger["性别"]
+    conflicts = []
+    if any(word in text for word in ["儿子", "父子", "母子"]) and younger_gender != "男":
+        conflicts.append("补充信息提到儿子/父子/母子，但较年轻命主为女，疑似上一盘上下文残留")
+    if any(word in text for word in ["女儿", "父女", "母女"]) and younger_gender != "女":
+        conflicts.append("补充信息提到女儿/父女/母女，但较年轻命主为男，疑似上一盘上下文残留")
+    return conflicts
 RELATION_TASK_PROFILES = {
     "relationship_identity": {
         "名称": "关系身份/事实类",
@@ -552,6 +570,15 @@ def _relation_from_question(question: str, first: Dict[str, Any], second: Dict[s
         return any(w in text or w.lower() in lowered for w in words)
 
     if has_any(["亲生", "亲子", "血缘", "父子", "父女", "母子", "母女", "孩子", "儿子", "女儿"]):
+        conflicts = _gendered_relation_conflicts(first, second, text)
+        if conflicts:
+            evidence.extend(conflicts)
+            return {
+                "细分": "补充信息与命主性别冲突，疑似上一盘上下文残留",
+                "保守层级": "上下文需清理后再判断",
+                "置信度": 38,
+                "证据": evidence,
+            }
         evidence.append("问题包含亲缘/子女关系关键词")
         return {
             "细分": _parent_child_label(first, second, age_diff),
@@ -1961,7 +1988,14 @@ def _relation_identification(
                 chart["细分"] = "照护、承接、长幼或依赖色彩较明显"
                 chart["置信度"] = max(chart.get("置信度", 0), 58)
 
-    if declared != "未提供":
+    context_conflicts = (prior or {}).get("上下文冲突") or []
+
+    if context_conflicts:
+        fine = "补充信息与命主资料冲突，疑似上一盘上下文残留"
+        coarse = "需清理补充事实/声明关系后重新判断"
+        confidence = 40
+        source = "上下文冲突检测"
+    elif declared != "未提供":
         fine = declared
         coarse = "用户声明关系"
         confidence = max(65, chart["置信度"])
@@ -1978,7 +2012,9 @@ def _relation_identification(
         source = "盘面关系画像"
 
     consistency = "用户未声明关系，系统只输出盘面关系画像；除非证据极强，不作现实身份断言"
-    if declared != "未提供":
+    if context_conflicts:
+        consistency = "补充事实与当前命主资料冲突，系统已停止沿用该补充事实，需清理上一盘上下文"
+    elif declared != "未提供":
         consistency = "用户已声明关系，系统以声明为现实关系前提，盘面只作状态与互动描述"
 
     return {
@@ -2265,6 +2301,16 @@ def _format_method_signals(meta):
         lines.append(f"{method}：{' / '.join(parts)}")
     return "\n".join(lines)
 
+
+def _method_section_template(method: str, summary: str, evidence: List[str], conclusion: str) -> str:
+    evidence_text = "\n".join(f"- {item}" for item in (evidence or [])[:4]) or "- 证据不集中"
+    return (
+        f"### {method}\n"
+        f"**内容**：{summary or '信号不集中'}\n"
+        f"**证据**：\n{evidence_text}\n"
+        f"**论断**：**{conclusion or '暂无明确结论'}**\n"
+    )
+
 def generate_relationship_prompt(compound_result):
     result_text = json.dumps(compound_result, ensure_ascii=False, indent=2, default=str)
     question = compound_result.get('问题', '')
@@ -2372,20 +2418,22 @@ def generate_relationship_prompt(compound_result):
     prompt += '13. 如果身份、责任来源或阻滞来源不能确认，必须列出信息缺口和一个定向追问卦问题；追问卦只用于消歧，不能反客为主推翻原盘结构。\n'
     prompt += '14. 若关系先验显示“大年龄差/代际年龄差/同性且未声明婚恋/声明亲子”，六爻妻财、官鬼、六合、天后等象必须优先翻译为资源、责任、照护、管束、依赖、权责或往来；除非补充事实明确声明婚恋，不得默认写成暧昧、恋人、男女朋友。\n'
     prompt += '15. 若补充事实或用户声明已经给出现实关系（如儿子、夫妻、同事），不得用盘面反向否定现实身份；只分析这段关系的状态、质量、问题和趋势。\n'
+    prompt += '16. 若补充事实与命主性别或年龄顺序冲突，优先判定为上一盘上下文残留或输入未清理，不得继续沿用冲突的亲缘/性别称谓。\n'
+    prompt += '17. 输出格式必须稳定：每个术数段都按“### 标题 / **内容** / **论断**”三层写；“论断”必须加粗，且每段不超过 2 个结论句。\n'
     prompt += '\n'
     prompt += '# 输出\n'
-    prompt += '【问题识别】简要说明本题问的是什么，不超过两行\n'
-    prompt += '【八字合盘】长期结构、冲合刑害、稳定性\n'
-    prompt += '【紫微合盘】命宫/夫妻宫牵动、人生结构和关系质量\n'
-    prompt += '【六爻】当前事实状态、谁主动、谁保留、关系是否有变化\n'
-    prompt += '【奇门遁甲】行为路径、阻力、暗线、主动被动\n'
-    prompt += '【梅花易数】趋势概率、关系是否向合或需变革\n'
-    prompt += '【大六壬】过程因果、起因-发展-结果链条\n'
-    prompt += '【关系复合卦】双人关系场校验\n'
-    prompt += '【综合验证】把各术数合在一起，说明哪些是主象、哪些是辅象、哪些是风险\n'
-    prompt += '【最终结论】最后再直接回答用户问题：主关系框架、关系动力、当前状态、长期稳定性、趋势\n'
-    prompt += '【信息缺口与追问】如果仍有歧义，列出需要补证的点和推荐追问卦问题\n'
-    prompt += '【建议】给 3-5 条具体建议\n'
+    prompt += '【问题识别】\n### 问题识别\n**内容**：简要说明本题问的是什么，不超过两行。\n**论断**：**只给任务类型和判定边界。**\n'
+    prompt += '【八字合盘】\n### 八字合盘\n**内容**：长期结构、冲合刑害、稳定性。\n**论断**：**写清主象与辅象，不要只报术语。**\n'
+    prompt += '【紫微合盘】\n### 紫微合盘\n**内容**：命宫/夫妻宫牵动、人生结构和关系质量。\n**论断**：**优先说明宫位牵动和关系轴心。**\n'
+    prompt += '【六爻】\n### 六爻\n**内容**：当前事实状态、谁主动、谁保留、关系是否有变化。\n**论断**：**直接给当前层的判断。**\n'
+    prompt += '【奇门遁甲】\n### 奇门遁甲\n**内容**：行为路径、阻力、暗线、主动被动。\n**论断**：**说明卡点和推进方向。**\n'
+    prompt += '【梅花易数】\n### 梅花易数\n**内容**：趋势概率、关系是否向合或需变革。\n**论断**：**说明趋势，不要泛泛而谈。**\n'
+    prompt += '【大六壬】\n### 大六壬\n**内容**：过程因果、起因-发展-结果链条。\n**论断**：**突出过程线而不是术语堆叠。**\n'
+    prompt += '【关系复合卦】\n### 关系复合卦\n**内容**：双人关系场校验。\n**论断**：**说明关系场是增益、阻滞还是消耗。**\n'
+    prompt += '【综合验证】\n### 综合验证\n**内容**：把各术数合在一起，说明哪些是主象、哪些是辅象、哪些是风险。\n**论断**：**只保留最关键的合参结论。**\n'
+    prompt += '【最终结论】\n### 最终结论\n**内容**：主关系框架、关系动力、当前状态、长期稳定性、趋势。\n**论断**：**用一句话给主判断，再用一句话给边界。**\n'
+    prompt += '【信息缺口与追问】\n### 信息缺口与追问\n**内容**：如果仍有歧义，列出需要补证的点和推荐追问卦问题。\n**论断**：**只给最必要的追问。**\n'
+    prompt += '【建议】\n### 建议\n**内容**：给 3-5 条具体建议。\n**论断**：**建议要短、具体、可执行。**\n'
     return prompt
 
 
@@ -2410,13 +2458,14 @@ def generate_relationship_followup_prompt(
     prompt += '3. 若追问只是补充身份、背景、阻力来源或对方态度，必须在原盘各术数信号内解释，不要要求用户重新起盘。\n'
     prompt += '4. 只有用户明确提出新的独立时效问题，例如“未来三个月会不会复合/是否结婚/是否联系”，才提醒可另起追问卦；本轮仍先按原盘给可回答部分。\n'
     prompt += '5. 大年龄差、同性未声明婚恋、亲子或照护语境下，妻财、官鬼、六合、天后优先解释为资源、责任、照护、管束、依赖、权责或往来，不默认写成暧昧/恋人。\n'
-    prompt += '6. 输出要短于完整解盘，重点回答用户本轮问题；如补充事实改变了关系画像，需要给出“修正后的最终判断”。\n\n'
+    prompt += '6. 输出要短于完整解盘，重点回答用户本轮问题；如补充事实改变了关系画像，需要给出“修正后的最终判断”。\n'
+    prompt += '7. 输出格式必须稳定：每段都按“### 标题 / **内容** / **论断**”写；论断必须加粗。\n\n'
     prompt += '# 输出格式\n'
-    prompt += '【追问识别】说明本轮是补充事实、同盘追问，还是建议另起追问卦。\n'
-    prompt += '【同盘回答】直接回答用户本轮问题。\n'
-    prompt += '【原盘依据】列出 3-6 条对应的原盘证据。\n'
-    prompt += '【修正结论】如果本轮补充改变关系画像，给出修正后的主关系框架；否则说明原结论是否保持。\n'
-    prompt += '【下一步】只给 1-3 条具体建议或下一追问方向。\n'
+    prompt += '### 追问识别\n**内容**：说明本轮是补充事实、同盘追问，还是建议另起追问卦。\n**论断**：**一句话说明是否沿用原盘。**\n'
+    prompt += '### 同盘回答\n**内容**：直接回答用户本轮问题。\n**论断**：**给出本轮最关键判断。**\n'
+    prompt += '### 原盘依据\n**内容**：列出 3-6 条对应的原盘证据。\n**论断**：**说明这些证据共同指向什么。**\n'
+    prompt += '### 修正结论\n**内容**：如果本轮补充改变关系画像，给出修正后的主关系框架；否则说明原结论是否保持。\n**论断**：**给出修正或维持后的最终判断。**\n'
+    prompt += '### 下一步\n**内容**：只给 1-3 条具体建议或下一追问方向。\n**论断**：**点明下一步最该做什么。**\n'
     return prompt
 
 
