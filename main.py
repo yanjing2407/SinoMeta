@@ -34,7 +34,11 @@ from llm_store import (
     save_provider,
     save_role,
 )
-from relationship import relationship_divination, stream_relationship_interpret
+from relationship import (
+    relationship_divination,
+    stream_relationship_followup,
+    stream_relationship_interpret,
+)
 
 STATIC_DIR = Path(__file__).parent / "static"
 LOG_PATH = Path(os.getenv("SINOMETA_LOG_PATH", Path(__file__).parent / "data" / "sinometa.log"))
@@ -125,6 +129,14 @@ class RelationshipRequest(BaseModel):
 
 
 class RelationshipInterpretRequest(RelationshipRequest):
+    role_id: Optional[int] = None
+    lenient_mode: bool = False
+
+
+class RelationshipFollowupRequest(BaseModel):
+    chart: dict
+    message: str
+    history: Optional[list] = None
     role_id: Optional[int] = None
     lenient_mode: bool = False
 
@@ -328,6 +340,51 @@ async def relationship_interpret(req: RelationshipInterpretRequest):
             yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
         except Exception as e:
             logger.exception("LLM stream failed trace=%s endpoint=relationship", trace_id)
+            yield f"data: {json.dumps({'error': str(e), 'trace_id': trace_id}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.post("/api/relationship/followup")
+async def relationship_followup(req: RelationshipFollowupRequest):
+    """关系复合盘同盘追问接口（SSE流式）"""
+    if not str(req.message or "").strip():
+        raise HTTPException(status_code=400, detail="追问或补充事实不能为空")
+    if not req.chart:
+        raise HTTPException(status_code=400, detail="原始关系复合盘不能为空")
+    role = resolve_active_role(req.role_id)
+    lenient_mode = bool(req.lenient_mode and _looks_local_base_url(role.get("base_url", "")))
+    result = req.chart
+    trace_id = uuid.uuid4().hex[:8]
+
+    def event_stream():
+        logger.info(
+            "LLM stream start trace=%s endpoint=relationship-followup role=%s provider=%s type=%s model=%s base_url=%s lenient=%s",
+            trace_id,
+            role.get("role_name"),
+            role.get("provider_name"),
+            role.get("provider_type"),
+            role.get("model"),
+            role.get("base_url"),
+            lenient_mode,
+        )
+        try:
+            for token in stream_relationship_followup(
+                result,
+                message=req.message,
+                history=req.history or [],
+                api_key=role["api_key"],
+                base_url=role["base_url"],
+                model=role["model"],
+                system_prompt=role["system_prompt"],
+                provider_type=role["provider_type"],
+                lenient_mode=lenient_mode,
+            ):
+                yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
+            logger.info("LLM stream done trace=%s endpoint=relationship-followup", trace_id)
+            yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            logger.exception("LLM stream failed trace=%s endpoint=relationship-followup", trace_id)
             yield f"data: {json.dumps({'error': str(e), 'trace_id': trace_id}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

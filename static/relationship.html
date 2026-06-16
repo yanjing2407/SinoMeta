@@ -246,6 +246,21 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);border:1px s
       <div class="card-title"><span>解读结果</span></div>
       <div class="card-body"><div class="ai-result" id="aiResult">等待解读。</div></div>
     </div>
+    <div class="card">
+      <div class="card-title"><span>同盘追问</span></div>
+      <div class="card-body">
+        <div class="form-group">
+          <label>追问 / 补充事实</label>
+          <textarea id="followupMessage" placeholder="例如：这是我和儿子；阻力主要来自谁？如果已经是夫妻，这盘重点看什么？"></textarea>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" id="btnFollowup" onclick="doFollowup()">沿用本盘继续解读</button>
+          <button class="btn" onclick="useFollowupAsNewQuestion()">作为新问题起盘</button>
+          <button class="btn" onclick="clearFollowup()">清空追问</button>
+        </div>
+        <div style="font-size:.82rem;color:var(--text-dim);margin-top:8px">补充事实和同盘追问不会重新起卦；只有作为新问题起盘才会刷新起卦时间。</div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -295,7 +310,7 @@ function buildRequest(){
   }catch(e){toast(e.message);return null}
 }
 
-let lastRequest=null,lastRequestKey='',formDirty=false,lastResult=null,lastAiText='',roles=[],selectedRoleId=null;
+let lastRequest=null,lastRequestKey='',formDirty=false,lastResult=null,lastAiText='',lastFollowupText='',followupHistory=[],roles=[],selectedRoleId=null;
 function stableStringify(value){
   if(value===null||typeof value!=='object')return JSON.stringify(value);
   if(Array.isArray(value))return '['+value.map(stableStringify).join(',')+']';
@@ -304,6 +319,7 @@ function stableStringify(value){
 function requestKey(req){return stableStringify(req)}
 function markFormDirty(){
   if(!lastRequest)return;
+  if(document.activeElement&&document.activeElement.id==='followupMessage')return;
   formDirty=true;
   const btn=$('btnInterpret');
   if(btn)btn.textContent='需重新起盘后解读';
@@ -313,13 +329,9 @@ function useFollowupQuestion(index){
   const item=(window.relationshipFollowups||[])[index]||{};
   const q=item['问题']||'';
   if(!q)return;
-  const current=$('context').value.trim();
-  const addition=`追问：${q}\n回答：`;
-  $('context').value=current?`${current}\n\n${addition}`:addition;
-  refreshTime();
-  markFormDirty();
-  $('context').focus();
-  toast('已填入追问，请在补充事实中回答后重新起盘');
+  $('followupMessage').value=q;
+  $('followupMessage').focus();
+  toast('已填入同盘追问，可直接继续解读');
 }
 function sleep(ms){return new Promise(resolve=>setTimeout(resolve,ms))}
 async function readError(res){try{const d=await res.json();return d.detail||d.error||JSON.stringify(d)}catch(_){return await res.text()}}
@@ -430,7 +442,7 @@ function renderMeta(meta){
   const layerNames=['事实层','关系性质层','结构稳定层','动态行为层','趋势概率层','底层因果层'];
   let html='<h3>关系先验</h3>'+priorNotes;
   html+='<h3 style="margin-top:10px">信息缺口</h3>'+gaps;
-  html+='<h3 style="margin-top:10px">推荐追问卦</h3>'+followups;
+  html+='<h3 style="margin-top:10px">推荐追问</h3>'+followups;
   html+='<details open><summary>关系候选与分类逼近</summary>';
   html+='<h3 style="margin-top:10px">候选关系排行</h3>'+ranking;
   html+='</details>';
@@ -563,6 +575,8 @@ function renderResults(data){
   renderCurrent(data['当前问事盘']||{});
   $('aiResult').innerHTML='等待解读。';
   lastAiText='';
+  lastFollowupText='';
+  followupHistory=[];
   $('resultArea').scrollIntoView({behavior:'smooth'});
 }
 async function doDivine(){
@@ -579,13 +593,15 @@ async function doDivine(){
   }catch(e){toast('起盘失败：'+e.message)}
   finally{btn.disabled=false;btn.textContent='起关系复合盘'}
 }
-async function streamSSE(url,body,el){
+async function streamSSE(url,body,el,options={}){
   const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(!res.ok)throw new Error(await readError(res));
   const reader=res.body.getReader();
   const decoder=new TextDecoder('utf-8');
+  const prefixText=options.prefixText||'';
+  const updateLastAiText=options.updateLastAiText!==false;
   let buffer='',text='';
-  el.innerHTML='<span class="cursor"></span>';
+  el.innerHTML=renderMarkdown(prefixText)+'<span class="cursor"></span>';
   while(true){
     const {value,done}=await reader.read();
     if(done)break;
@@ -597,11 +613,24 @@ async function streamSSE(url,body,el){
       if(!line)continue;
       const data=JSON.parse(line.slice(5).trim());
       if(data.error)throw new Error(`[${data.trace_id||''}] ${data.error}`);
-      if(data.token){text+=data.token;lastAiText=text;el.innerHTML=renderMarkdown(text)+'<span class="cursor"></span>'}
-      if(data.done){el.innerHTML=renderMarkdown(text);return}
+      if(data.token){
+        text+=data.token;
+        const shown=prefixText+text;
+        if(updateLastAiText)lastAiText=shown;
+        el.innerHTML=renderMarkdown(shown)+'<span class="cursor"></span>';
+      }
+      if(data.done){
+        const shown=prefixText+text;
+        if(updateLastAiText)lastAiText=shown;
+        el.innerHTML=renderMarkdown(shown);
+        return text;
+      }
     }
   }
-  el.innerHTML=renderMarkdown(text);
+  const shown=prefixText+text;
+  if(updateLastAiText)lastAiText=shown;
+  el.innerHTML=renderMarkdown(shown);
+  return text;
 }
 async function doInterpret(){
   if(!lastRequest){toast('请先起盘');return}
@@ -615,6 +644,34 @@ async function doInterpret(){
   }catch(e){$('aiResult').innerHTML=`<div class="error-box">AI 请求失败<br>${escapeHTML(e.message)}</div>`;toast('解读失败')}
   finally{btn.disabled=false;btn.textContent='专家解读'}
 }
+async function doFollowup(){
+  if(!lastResult){toast('请先起盘');return}
+  const msg=$('followupMessage').value.trim();
+  if(!msg){toast('请填写追问或补充事实');return}
+  if(!selectedRoleId){toast('请先选择角色');return}
+  const btn=$('btnFollowup');btn.disabled=true;btn.textContent='追问解读中...';
+  const original=lastAiText;
+  try{
+    const body={chart:lastResult,message:msg,history:followupHistory,role_id:selectedRoleId,lenient_mode:!!$('lenientMode').checked};
+    const prefix=`${original||''}${original?'\n\n---\n\n':''}## 追问\n${msg}\n\n`;
+    const answer=await streamSSE('/api/relationship/followup',body,$('aiResult'),{prefixText:prefix,updateLastAiText:false});
+    followupHistory.push({问题:msg,回答:answer});
+    lastFollowupText+=`${lastFollowupText?'\n\n':''}## 追问\n${msg}\n\n${answer}`;
+    lastAiText=prefix+answer;
+    $('followupMessage').value='';
+  }catch(e){lastAiText=original;$('aiResult').innerHTML=`${renderMarkdown(original||'')}<div class="error-box">追问失败<br>${escapeHTML(e.message)}</div>`;toast('追问失败')}
+  finally{btn.disabled=false;btn.textContent='沿用本盘继续解读'}
+}
+function useFollowupAsNewQuestion(){
+  const msg=$('followupMessage').value.trim();
+  if(!msg){toast('请填写追问或补充事实');return}
+  $('event').value=msg;
+  refreshTime();
+  markFormDirty();
+  window.scrollTo({top:0,behavior:'smooth'});
+  toast('已作为新问题填入，请重新起盘');
+}
+function clearFollowup(){$('followupMessage').value=''}
 function buildDivinationText(){return lastResult?`==================== 关系复合盘 ====================\n${JSON.stringify(lastResult,null,2)}\n==================================================\n`:''}
 function downloadText(text,filename){const blob=new Blob([text],{type:'text/plain;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url)}
 async function copyText(text,msg){if(!text){toast('暂无内容');return}try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text)}else{const ta=document.createElement('textarea');ta.value=text;ta.style.position='fixed';ta.style.left='-9999px';document.body.appendChild(ta);ta.focus();ta.select();document.execCommand('copy');document.body.removeChild(ta)}toast(msg)}catch(e){toast('复制失败，请手动选择文本')}}

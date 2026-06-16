@@ -222,12 +222,15 @@ def test_relationship_page_and_routes_present():
     assert '@app.get("/relationship")' in main_py
     assert '@app.post("/api/relationship/divine")' in main_py
     assert '@app.post("/api/relationship/interpret")' in main_py
+    assert '@app.post("/api/relationship/followup")' in main_py
     assert "关系复合盘" in relationship_html
     assert "copyDivinationText" in relationship_html
     assert "useFollowupQuestion" in relationship_html
-    assert "推荐追问卦" in relationship_html
+    assert "推荐追问" in relationship_html
     assert "补充事实 / 回答追问" in relationship_html
     assert "context:$('context').value.trim()" in relationship_html
+    assert "同盘追问" in relationship_html
+    assert "沿用本盘继续解读" in relationship_html
     assert 'href="/relationship"' in index_html
     print("PASS: test_relationship_page_and_routes_present")
 
@@ -386,6 +389,24 @@ def test_relationship_parent_child_prior_suppresses_romance():
     assert ranking["亲缘/照护/长幼关系"] > ranking["婚恋/暧昧/亲密牵连"]
     assert "伴侣" not in user["推荐追问"][0]["问题"]
     print("PASS: test_relationship_parent_child_prior_suppresses_romance")
+
+
+def test_relationship_followup_contract_reuses_chart():
+    from pathlib import Path
+
+    main_py = Path("main.py").read_text(encoding="utf-8")
+    relationship_py = Path("relationship.py").read_text(encoding="utf-8")
+
+    assert "class RelationshipFollowupRequest" in main_py
+    assert "chart: dict" in main_py
+    assert "message: str" in main_py
+    assert "relationship_divination(req.model_dump())" in main_py
+    followup_section = main_py.split('async def relationship_followup', 1)[1].split('@app.get("/api/roles")', 1)[0]
+    assert "relationship_divination(" not in followup_section
+    assert "stream_relationship_followup" in followup_section
+    assert "generate_relationship_followup_prompt" in relationship_py
+    assert "不得重新起卦" in relationship_py
+    print("PASS: test_relationship_followup_contract_reuses_chart")
 
 
 def test_sqlite_busy_timeout():
@@ -885,6 +906,7 @@ if __name__ == '__main__':
     test_relationship_divination_weak_description()
     test_relationship_second_subject_change_diagnostics()
     test_relationship_parent_child_prior_suppresses_romance()
+    test_relationship_followup_contract_reuses_chart()
     test_sqlite_busy_timeout()
     test_jie_qi_month()
     test_true_solar_time()

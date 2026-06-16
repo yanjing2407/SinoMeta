@@ -2387,6 +2387,67 @@ def generate_relationship_prompt(compound_result):
     prompt += '【信息缺口与追问】如果仍有歧义，列出需要补证的点和推荐追问卦问题\n'
     prompt += '【建议】给 3-5 条具体建议\n'
     return prompt
+
+
+def generate_relationship_followup_prompt(
+    compound_result: Dict[str, Any],
+    message: str,
+    history: Optional[List[Dict[str, Any]]] = None,
+) -> str:
+    message = str(message or "").strip()
+    history = history or []
+    prompt = '你是一位传统术数关系合盘解读助手。现在用户在同一张关系复合盘下继续追问或补充事实。\n\n'
+    prompt += '# 本轮追问/补充事实\n'
+    prompt += message + '\n\n'
+    if history:
+        prompt += '# 已有追问记录\n'
+        prompt += json.dumps(history[-6:], ensure_ascii=False, indent=2, default=str) + '\n\n'
+    prompt += '# 原始关系复合盘\n'
+    prompt += json.dumps(compound_result, ensure_ascii=False, indent=2, default=str) + '\n\n'
+    prompt += '# 硬性规则\n'
+    prompt += '1. 本轮是“沿用原盘继续解读”，不得重新起卦，不得改变原盘中的起卦时间、六爻卦名、世应、动爻、奇门局、梅花卦、大六壬三传和关系复合卦。\n'
+    prompt += '2. 用户补充事实优先用于修正现实语境；不能用盘面反向否定用户已说明的现实关系。\n'
+    prompt += '3. 若追问只是补充身份、背景、阻力来源或对方态度，必须在原盘各术数信号内解释，不要要求用户重新起盘。\n'
+    prompt += '4. 只有用户明确提出新的独立时效问题，例如“未来三个月会不会复合/是否结婚/是否联系”，才提醒可另起追问卦；本轮仍先按原盘给可回答部分。\n'
+    prompt += '5. 大年龄差、同性未声明婚恋、亲子或照护语境下，妻财、官鬼、六合、天后优先解释为资源、责任、照护、管束、依赖、权责或往来，不默认写成暧昧/恋人。\n'
+    prompt += '6. 输出要短于完整解盘，重点回答用户本轮问题；如补充事实改变了关系画像，需要给出“修正后的最终判断”。\n\n'
+    prompt += '# 输出格式\n'
+    prompt += '【追问识别】说明本轮是补充事实、同盘追问，还是建议另起追问卦。\n'
+    prompt += '【同盘回答】直接回答用户本轮问题。\n'
+    prompt += '【原盘依据】列出 3-6 条对应的原盘证据。\n'
+    prompt += '【修正结论】如果本轮补充改变关系画像，给出修正后的主关系框架；否则说明原结论是否保持。\n'
+    prompt += '【下一步】只给 1-3 条具体建议或下一追问方向。\n'
+    return prompt
+
+
+def stream_relationship_followup(
+    compound_result: Dict[str, Any],
+    message: str,
+    history: Optional[List[Dict[str, Any]]],
+    api_key: str,
+    base_url: str,
+    model: str,
+    system_prompt: str = "",
+    provider_type: str = "openai_compatible",
+    lenient_mode: bool = False,
+):
+    system_msg = system_prompt or "你是一位严谨、客观的传统术数关系合盘分析顾问。"
+    system_msg = f"{system_msg.rstrip()}\n\n{FINAL_ANSWER_PROMPT.strip()}"
+    if lenient_mode:
+        system_msg = f"{system_msg.rstrip()}\n\n{LENIENT_MODE_PROMPT.strip()}"
+    messages = [
+        {"role": "system", "content": system_msg},
+        {
+            "role": "user",
+            "content": f"{NO_THINK_USER_PREFIX}\n{generate_relationship_followup_prompt(compound_result, message, history)}",
+        },
+    ]
+    if provider_type == "ollama_native":
+        yield from _stream_ollama_native(messages, api_key, base_url, model)
+    else:
+        yield from _stream_openai_compatible(messages, api_key, base_url, model)
+
+
 def build_relationship_messages(
     compound_result: Dict[str, Any],
     system_prompt: str = "",
