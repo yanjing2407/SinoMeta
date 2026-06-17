@@ -436,6 +436,9 @@ function renderMeta(meta){
   const motives=(user['动力']||[]).join('、')||'暂无明确动力';
   const notLike=(user['不像关系']||[]).join('、')||'暂无明显排除项';
   $('conclusionResult').innerHTML='<h3>直接结论</h3>'+kvHtml([
+    ['现实身份层',user['现实身份层']||final['身份边界']||''],
+    ['情感状态层',user['情感状态层']||''],
+    ['关系质量层',user['关系质量层']||''],
     ['一句话',user['一句话结论']||final['主关系定义']||''],
     ['直接回答',user['直接回答']||''],
     ['主框架',`${framework['主框架']||''} ${framework['强度']??''}`],

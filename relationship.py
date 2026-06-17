@@ -23,6 +23,7 @@ from integrate import (
     _stream_ollama_native,
     _stream_openai_compatible,
 )
+from hexagram_semantics import get_hexagram_semantics, summarize_hexagram_path
 from liuyao import GUA_64, pa_pan_by_numbers as liuyao_pa_pan_num, pa_pan_by_time as liuyao_pa_pan
 from meihua import (
     XT2GUA,
@@ -777,6 +778,35 @@ def _dominant_labels(signals: List[Dict[str, Any]], count: int = 3) -> List[str]
     return [label for label, _ in sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:count]]
 
 
+def _add_hexagram_semantic_signals(
+    signals: List[Dict[str, Any]],
+    evidence: List[str],
+    method_label: str,
+    key: str,
+    item: Dict[str, Any],
+    base_strength: float,
+) -> None:
+    if not item:
+        return
+    semantics = get_hexagram_semantics(item.get("卦名"), item.get("上卦"), item.get("下卦"), domain="relationship")
+    name = semantics.get("卦名") or item.get("卦名") or ""
+    candidates = semantics.get("本题候选义", [])[:2]
+    risks = semantics.get("风险标签", [])[:2]
+    if not name:
+        return
+    if candidates:
+        evidence.append(f"{method_label}{key}为{name}，关系候选义：{'、'.join(candidates)}")
+    text = " ".join(candidates + risks)
+    if any(word in text for word in ["吸引", "亲密", "互感", "靠近", "和合", "公开往来", "共同", "聚"]):
+        _add_signal(signals, f"{method_label}卦义亲近", base_strength, "合", f"{key}{name}：{'、'.join(candidates)}")
+    if any(word in text for word in ["照护", "承接", "滋养", "责任", "规则", "权责", "边界"]):
+        _add_signal(signals, f"{method_label}卦义责任", max(0.45, base_strength - 0.1), "中性", f"{key}{name}：{'、'.join(candidates)}")
+    if any(word in text for word in ["阻", "隔", "争", "困", "停", "消耗", "冲突", "退缩", "不稳", "冷", "误解"]):
+        _add_signal(signals, f"{method_label}卦义阻滞", base_strength, "冲", f"{key}{name}：{'、'.join(candidates + risks)}")
+    if any(word in text for word in ["转", "改变", "变", "推进", "回暖", "修复", "明朗"]):
+        _add_signal(signals, f"{method_label}卦义变化", max(0.45, base_strength - 0.05), "变", f"{key}{name}：{'、'.join(candidates)}")
+
+
 def _extract_liuyao_semantics(liuyao: Dict[str, Any]) -> Dict[str, Any]:
     signals: List[Dict[str, Any]] = []
     evidence: List[str] = []
@@ -784,6 +814,7 @@ def _extract_liuyao_semantics(liuyao: Dict[str, Any]) -> Dict[str, Any]:
         return {"术数": "六爻", "语义层": ["事实层", "关系性质层", "趋势概率层"], "标签": signals, "摘要": "六爻盘不可用", "证据": evidence}
 
     gua_name = str(liuyao.get("卦名", ""))
+    _add_hexagram_semantic_signals(signals, evidence, "六爻", "本卦", liuyao, 0.55)
     if any(word in gua_name for word in ["咸", "归妹", "家人", "泰", "同人", "比", "兑"]):
         _add_signal(signals, "亲密牵引", 0.75, "合", f"六爻卦名为{gua_name}，有关系/亲近象")
     if any(word in gua_name for word in ["睽", "否", "讼", "困", "革", "剥"]):
@@ -862,6 +893,7 @@ def _extract_meihua_semantics(meihua: Dict[str, Any]) -> Dict[str, Any]:
 
     for key in ("本卦", "互卦", "变卦"):
         name = ((meihua.get(key) or {}).get("卦名") or "")
+        _add_hexagram_semantic_signals(signals, evidence, "梅花", key, meihua.get(key) or {}, 0.5)
         if name:
             evidence.append(f"{key}为{name}")
         if any(word in name for word in ["咸", "归妹", "家人", "泰", "同人"]):
@@ -891,6 +923,7 @@ def _extract_compound_hex_semantics(compound_hex: Dict[str, Any]) -> Dict[str, A
 
     for key in ("本卦", "互卦", "变卦"):
         name = ((compound_hex.get(key) or {}).get("卦名") or "")
+        _add_hexagram_semantic_signals(signals, evidence, "复合", key, compound_hex.get(key) or {}, 0.55)
         if name:
             evidence.append(f"{key}为{name}")
         if any(word in name for word in ["咸", "归妹", "家人", "泰", "同人", "比"]):
@@ -1463,6 +1496,50 @@ def _brief_from_labels(labels: List[str], fallback: str) -> str:
     return "、".join(labels[:2])
 
 
+def _build_identity_layer(declared_relation: str) -> str:
+    declared = _declared_relation_text(declared_relation)
+    if declared == "未提供":
+        return "未声明现实身份；本盘只输出关系画像，不证明或否认夫妻、亲子、法律身份。"
+    return f"用户已声明为“{declared}”；本盘接受该现实前提，只分析状态、质量、风险与趋势。"
+
+
+def _build_emotional_state_layer(
+    ranking: List[Dict[str, Any]],
+    motives: List[str],
+    prior: Optional[Dict[str, Any]] = None,
+) -> str:
+    intimate_strength = _ranking_strength(ranking, "婚恋")
+    care_strength = _ranking_strength(ranking, "照护") + _ranking_strength(ranking, "亲缘")
+    cooperation_strength = _ranking_strength(ranking, "合作") + _ranking_strength(ranking, "权责")
+    conflict_strength = _ranking_strength(ranking, "冲突")
+    suppressed = bool(prior and prior.get("压制婚恋暧昧") and not prior.get("声明伴侣"))
+
+    if suppressed and care_strength >= max(intimate_strength, 0.35):
+        primary = "情感不按男女暧昧优先解释，主要看照护、责任、依赖或长幼牵连。"
+    elif intimate_strength >= 0.65:
+        primary = "亲密牵连明显，有吸引、暧昧、伴侣式靠近或强情感投入信号。"
+    elif intimate_strength >= 0.38:
+        primary = "有一定亲密或吸引信号，但不足以单凭盘面坐实婚恋身份。"
+    elif care_strength >= 0.45:
+        primary = "情感表达偏照护、承接、依赖或责任牵挂，不是单纯暧昧热度。"
+    elif cooperation_strength >= 0.4:
+        primary = "情感热度不算主轴，更偏现实事务、合作、资源或权责往来。"
+    else:
+        primary = "情感信号不集中，需要结合现实互动确认。"
+
+    if conflict_strength >= 0.45 and "冲突消耗" in motives:
+        primary += " 同时伴随冲突或消耗，不能只看亲密一面。"
+    return primary
+
+
+def _build_quality_layer(framework: Dict[str, Any], stability: str, motives: List[str]) -> str:
+    framework_name = framework.get("主框架", "关系画像不明")
+    auxiliary = framework.get("辅助框架") or []
+    aux_text = f"，辅见{'、'.join(auxiliary[:2])}" if auxiliary else ""
+    motive_text = "、".join(motives[:2]) if motives else "关系动力不集中"
+    return f"{framework_name}{aux_text}；关系动力以{motive_text}为主；长期稳定性{stability}。"
+
+
 def _build_user_facing_conclusion(
     layers: Dict[str, Any],
     identification: Dict[str, Any],
@@ -1494,8 +1571,6 @@ def _build_user_facing_conclusion(
     top_type = top["类型"]
     second_text = f"，其次带有“{second['类型']}”信号" if second and second["强度"] >= 0.35 else ""
     not_like_text = "；不像" + "、".join(not_like) if not_like else ""
-    one_sentence = f"主框架最像“{framework['主框架']}”（{framework['强度']}）{second_text}{not_like_text}。{boundary}"
-
     direct_map = {
         "已成关系框架": "更像已经成形的关系框架，重点是维系质量与现实责任。",
         "未定型吸引框架": "更像有吸引和牵引，但身份或现实框架尚未坐实。",
@@ -1518,9 +1593,17 @@ def _build_user_facing_conclusion(
     else:
         stability = "低"
 
+    identity_layer = _build_identity_layer(declared_relation)
+    emotional_layer = _build_emotional_state_layer(ranking, motives, prior)
+    quality_layer = _build_quality_layer(framework, stability, motives)
+    one_sentence = f"现实身份层：{identity_layer} 情感状态层：{emotional_layer} 关系质量层：{quality_layer}{second_text}{not_like_text}"
+
     return {
         "一句话结论": one_sentence,
         "直接回答": user_answer,
+        "现实身份层": identity_layer,
+        "情感状态层": emotional_layer,
+        "关系质量层": quality_layer,
         "最像关系": top,
         "主框架": framework,
         "动力": motives,
@@ -1623,6 +1706,7 @@ def _raw_liuyao_points(liuyao: Dict[str, Any]) -> Dict[str, Any]:
         "动爻": [_format_yao_brief(y) for y in moving] or ["无动爻"],
         "落空爻": empties or ["无"],
         "判读锚点": ["世应关系", "动爻", "旬空/月破", "六亲主线"],
+        "六十四卦语义": summarize_hexagram_path({"本卦": {"卦名": liuyao.get("卦名", ""), "上卦": liuyao.get("上卦", ""), "下卦": liuyao.get("下卦", "")}}, domain="relationship"),
     }
 
 
@@ -1695,7 +1779,7 @@ def _raw_qimen_points(qimen: Dict[str, Any]) -> Dict[str, Any]:
 def _raw_meihua_points(meihua: Dict[str, Any]) -> Dict[str, Any]:
     if not meihua or meihua.get("错误"):
         return {"可用": False, "错误": meihua.get("错误") if isinstance(meihua, dict) else "梅花盘缺失"}
-    return {
+    payload = {
         "可用": True,
         "本卦": meihua.get("本卦", {}),
         "互卦": meihua.get("互卦", {}),
@@ -1704,6 +1788,15 @@ def _raw_meihua_points(meihua: Dict[str, Any]) -> Dict[str, Any]:
         "体用分析": meihua.get("体用分析", {}),
         "判读锚点": ["本卦", "互卦", "变卦", "体用", "动爻"],
     }
+    payload["六十四卦语义"] = summarize_hexagram_path(
+        {
+            "本卦": meihua.get("本卦", {}),
+            "互卦": meihua.get("互卦", {}),
+            "变卦": meihua.get("变卦", {}),
+        },
+        domain="relationship",
+    )
+    return payload
 
 
 def _raw_daliuren_points(dlr: Dict[str, Any]) -> Dict[str, Any]:
@@ -1734,7 +1827,7 @@ def _raw_daliuren_points(dlr: Dict[str, Any]) -> Dict[str, Any]:
 def _raw_compound_hex_points(compound_hex: Dict[str, Any]) -> Dict[str, Any]:
     if not compound_hex:
         return {"可用": False, "错误": "关系复合卦缺失"}
-    return {
+    payload = {
         "可用": True,
         "本卦": compound_hex.get("本卦", {}),
         "互卦": compound_hex.get("互卦", {}),
@@ -1743,6 +1836,15 @@ def _raw_compound_hex_points(compound_hex: Dict[str, Any]) -> Dict[str, Any]:
         "体用分析": compound_hex.get("体用分析", {}),
         "判读锚点": ["本卦", "互卦", "变卦", "体用", "动爻"],
     }
+    payload["六十四卦语义"] = summarize_hexagram_path(
+        {
+            "本卦": compound_hex.get("本卦", {}),
+            "互卦": compound_hex.get("互卦", {}),
+            "变卦": compound_hex.get("变卦", {}),
+        },
+        domain="relationship",
+    )
+    return payload
 
 
 def _birth_fingerprint(first: Dict[str, Any], second: Dict[str, Any], q_dt: datetime, payload: Dict[str, Any]) -> str:
@@ -2330,6 +2432,9 @@ def generate_relationship_prompt(compound_result):
     current_state = user_conc.get('当前状态', '')
     stability = user_conc.get('长期稳定性', '')
     trend = user_conc.get('发展趋势', '')
+    identity_layer = user_conc.get('现实身份层', '')
+    emotional_layer = user_conc.get('情感状态层', '')
+    quality_layer = user_conc.get('关系质量层', '')
 
     ranking_text = ''
     if ranking:
@@ -2371,6 +2476,9 @@ def generate_relationship_prompt(compound_result):
     prompt += '关系判断：' + top_type + '（可信度等级：' + top_level + '，强度：' + str(top_strength) + '）\n'
     prompt += '不像关系：' + not_like_text + '\n'
     prompt += '直接回答：' + direct_answer + '\n'
+    prompt += '现实身份层：' + identity_layer + '\n'
+    prompt += '情感状态层：' + emotional_layer + '\n'
+    prompt += '关系质量层：' + quality_layer + '\n'
     prompt += '当前状态：' + current_state + '\n'
     prompt += '长期稳定性：' + stability + '\n'
     prompt += '发展趋势：' + trend + '\n'
@@ -2414,26 +2522,29 @@ def generate_relationship_prompt(compound_result):
     prompt += '9. 如果短期状态与长期结构不一致，直接说“当前如何、长期如何”，不要和稀泥。\n'
     prompt += '10. 输出要信息充分，建议 1200-2000 字；不要只写三小段。\n'
     prompt += '11. 六爻、奇门、梅花属于当前问事盘；只换第二命主生日时，它们不变不能证明两段关系一样。关系性质必须重点核验八字合盘、紫微合盘、关系复合卦和大六壬第二命主行年。\n'
-    prompt += '12. 最终结论必须先写“主关系框架”，再写“关系动力”，不要只写婚恋/暧昧/亲密牵连这类大桶标签。\n'
+    prompt += '12. 最终结论必须分成三层：“现实身份层 / 情感状态层 / 关系质量层”。关系质量标签不得覆盖现实身份标签；冲突、消耗、阻滞只能说明质量，不能写成“不是夫妻/不是伴侣”。\n'
     prompt += '13. 如果身份、责任来源或阻滞来源不能确认，必须列出信息缺口和一个定向追问卦问题；追问卦只用于消歧，不能反客为主推翻原盘结构。\n'
     prompt += '14. 若关系先验显示“大年龄差/代际年龄差/同性且未声明婚恋/声明亲子”，六爻妻财、官鬼、六合、天后等象必须优先翻译为资源、责任、照护、管束、依赖、权责或往来；除非补充事实明确声明婚恋，不得默认写成暧昧、恋人、男女朋友。\n'
     prompt += '15. 若补充事实或用户声明已经给出现实关系（如儿子、夫妻、同事），不得用盘面反向否定现实身份；只分析这段关系的状态、质量、问题和趋势。\n'
     prompt += '16. 若补充事实与命主性别或年龄顺序冲突，优先判定为上一盘上下文残留或输入未清理，不得继续沿用冲突的亲缘/性别称谓。\n'
-    prompt += '17. 输出格式必须稳定：每个术数段都按“### 标题 / **内容** / **论断**”三层写；“论断”必须加粗，且每段不超过 2 个结论句。\n'
+    prompt += '17. 原始盘要点中的“六十四卦语义”是候选义筛选器：必须结合问事类型、世应/体用/动爻和其他术数，只取 2-3 个最强解释，不得机械照抄全部候选义。\n'
+    prompt += '18. 未声明现实关系时，也必须自动判断情感情况：明确写“亲密牵连明显/有一定吸引/情感弱而事务强/偏照护责任”等，不得只写冲突或结构。\n'
+    prompt += '19. 用户问题原文不得改写、净化或替换；即使表达粗俗，也按原文识别并直接回答，但结论必须保留双方自愿、现实边界和风险提示。\n'
+    prompt += '20. 输出格式必须稳定：每段只用“## 标题 / **内容：** / **论断：**”三层写；不要再混用【标题】；“论断”必须加粗，且每段不超过 2 个结论句。\n'
     prompt += '\n'
     prompt += '# 输出\n'
-    prompt += '【问题识别】\n### 问题识别\n**内容**：简要说明本题问的是什么，不超过两行。\n**论断**：**只给任务类型和判定边界。**\n'
-    prompt += '【八字合盘】\n### 八字合盘\n**内容**：长期结构、冲合刑害、稳定性。\n**论断**：**写清主象与辅象，不要只报术语。**\n'
-    prompt += '【紫微合盘】\n### 紫微合盘\n**内容**：命宫/夫妻宫牵动、人生结构和关系质量。\n**论断**：**优先说明宫位牵动和关系轴心。**\n'
-    prompt += '【六爻】\n### 六爻\n**内容**：当前事实状态、谁主动、谁保留、关系是否有变化。\n**论断**：**直接给当前层的判断。**\n'
-    prompt += '【奇门遁甲】\n### 奇门遁甲\n**内容**：行为路径、阻力、暗线、主动被动。\n**论断**：**说明卡点和推进方向。**\n'
-    prompt += '【梅花易数】\n### 梅花易数\n**内容**：趋势概率、关系是否向合或需变革。\n**论断**：**说明趋势，不要泛泛而谈。**\n'
-    prompt += '【大六壬】\n### 大六壬\n**内容**：过程因果、起因-发展-结果链条。\n**论断**：**突出过程线而不是术语堆叠。**\n'
-    prompt += '【关系复合卦】\n### 关系复合卦\n**内容**：双人关系场校验。\n**论断**：**说明关系场是增益、阻滞还是消耗。**\n'
-    prompt += '【综合验证】\n### 综合验证\n**内容**：把各术数合在一起，说明哪些是主象、哪些是辅象、哪些是风险。\n**论断**：**只保留最关键的合参结论。**\n'
-    prompt += '【最终结论】\n### 最终结论\n**内容**：主关系框架、关系动力、当前状态、长期稳定性、趋势。\n**论断**：**用一句话给主判断，再用一句话给边界。**\n'
-    prompt += '【信息缺口与追问】\n### 信息缺口与追问\n**内容**：如果仍有歧义，列出需要补证的点和推荐追问卦问题。\n**论断**：**只给最必要的追问。**\n'
-    prompt += '【建议】\n### 建议\n**内容**：给 3-5 条具体建议。\n**论断**：**建议要短、具体、可执行。**\n'
+    prompt += '## 问题识别\n**内容：** 简要说明本题问的是什么，不超过两行。\n**论断：** **只给任务类型和判定边界。**\n'
+    prompt += '## 八字合盘\n**内容：** 长期结构、冲合刑害、稳定性。\n**论断：** **写清主象与辅象，不要只报术语。**\n'
+    prompt += '## 紫微合盘\n**内容：** 命宫/夫妻宫牵动、人生结构和关系质量。\n**论断：** **优先说明宫位牵动和关系轴心。**\n'
+    prompt += '## 六爻\n**内容：** 当前事实状态、谁主动、谁保留、关系是否有变化。\n**论断：** **直接给当前层的判断。**\n'
+    prompt += '## 奇门遁甲\n**内容：** 行为路径、阻力、暗线、主动被动。\n**论断：** **说明卡点和推进方向。**\n'
+    prompt += '## 梅花易数\n**内容：** 趋势概率、关系是否向合或需变革。\n**论断：** **说明趋势，不要泛泛而谈。**\n'
+    prompt += '## 大六壬\n**内容：** 过程因果、起因-发展-结果链条。\n**论断：** **突出过程线而不是术语堆叠。**\n'
+    prompt += '## 关系复合卦\n**内容：** 双人关系场校验。\n**论断：** **说明关系场是增益、阻滞还是消耗。**\n'
+    prompt += '## 综合验证\n**内容：** 把各术数合在一起，说明哪些是主象、哪些是辅象、哪些是风险。\n**论断：** **只保留最关键的合参结论。**\n'
+    prompt += '## 最终结论\n**内容：** 必须分行写：现实身份层、情感状态层、关系质量层、当前状态、长期稳定性、趋势。\n**论断：** **用一句话给最终主判断，再用一句话给现实边界。**\n'
+    prompt += '## 信息缺口与追问\n**内容：** 如果仍有歧义，列出需要补证的点和推荐追问卦问题。\n**论断：** **只给最必要的追问。**\n'
+    prompt += '## 建议\n**内容：** 给 3-5 条具体建议。\n**论断：** **建议要短、具体、可执行。**\n'
     return prompt
 
 
@@ -2459,13 +2570,17 @@ def generate_relationship_followup_prompt(
     prompt += '4. 只有用户明确提出新的独立时效问题，例如“未来三个月会不会复合/是否结婚/是否联系”，才提醒可另起追问卦；本轮仍先按原盘给可回答部分。\n'
     prompt += '5. 大年龄差、同性未声明婚恋、亲子或照护语境下，妻财、官鬼、六合、天后优先解释为资源、责任、照护、管束、依赖、权责或往来，不默认写成暧昧/恋人。\n'
     prompt += '6. 输出要短于完整解盘，重点回答用户本轮问题；如补充事实改变了关系画像，需要给出“修正后的最终判断”。\n'
-    prompt += '7. 输出格式必须稳定：每段都按“### 标题 / **内容** / **论断**”写；论断必须加粗。\n\n'
+    prompt += '7. 用户追问原文不得改写、净化或替换；即使表达粗俗，也按原文识别并直接回答，但涉及亲密/性关系时必须保留双方自愿、边界和风险提示。\n'
+    prompt += '8. 若用户补充“这是夫妻/亲子/同事”等现实关系，只能把它作为现实身份层前提；不得用冲突、阻滞、消耗等质量标签反向否定身份，也不得抹掉原盘中的亲密/照护/权责信号。\n'
+    prompt += '9. 修正结论必须分成三层：“现实身份层 / 情感状态层 / 关系质量层”。\n'
+    prompt += '10. 若原盘带有“六十四卦语义”，只可把它当作候选义筛选器，必须结合本轮补充事实与原盘选出 2-3 个最强解释，不可重新起义或机械抄全量候选义。\n'
+    prompt += '11. 输出格式必须稳定：每段都按“## 标题 / **内容：** / **论断：**”写；论断必须加粗。\n\n'
     prompt += '# 输出格式\n'
-    prompt += '### 追问识别\n**内容**：说明本轮是补充事实、同盘追问，还是建议另起追问卦。\n**论断**：**一句话说明是否沿用原盘。**\n'
-    prompt += '### 同盘回答\n**内容**：直接回答用户本轮问题。\n**论断**：**给出本轮最关键判断。**\n'
-    prompt += '### 原盘依据\n**内容**：列出 3-6 条对应的原盘证据。\n**论断**：**说明这些证据共同指向什么。**\n'
-    prompt += '### 修正结论\n**内容**：如果本轮补充改变关系画像，给出修正后的主关系框架；否则说明原结论是否保持。\n**论断**：**给出修正或维持后的最终判断。**\n'
-    prompt += '### 下一步\n**内容**：只给 1-3 条具体建议或下一追问方向。\n**论断**：**点明下一步最该做什么。**\n'
+    prompt += '## 追问识别\n**内容：** 说明本轮是补充事实、同盘追问，还是建议另起追问卦。\n**论断：** **一句话说明是否沿用原盘。**\n'
+    prompt += '## 同盘回答\n**内容：** 直接回答用户本轮问题，保留用户追问原意，不替换用户问题。\n**论断：** **给出本轮最关键判断。**\n'
+    prompt += '## 原盘依据\n**内容：** 列出 3-6 条对应的原盘证据。\n**论断：** **说明这些证据共同指向什么。**\n'
+    prompt += '## 修正结论\n**内容：** 必须分行写：现实身份层、情感状态层、关系质量层；如未改变关系画像，则说明原结论保持。\n**论断：** **给出修正或维持后的最终判断。**\n'
+    prompt += '## 下一步\n**内容：** 只给 1-3 条具体建议或下一追问方向。\n**论断：** **点明下一步最该做什么。**\n'
     return prompt
 
 

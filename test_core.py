@@ -438,6 +438,8 @@ def test_relationship_followup_contract_reuses_chart():
 
     main_py = Path("main.py").read_text(encoding="utf-8")
     relationship_py = Path("relationship.py").read_text(encoding="utf-8")
+    hexagram_py = Path("hexagram_semantics.py").read_text(encoding="utf-8")
+    relationship_html = Path("static/relationship.html").read_text(encoding="utf-8")
 
     assert "class RelationshipFollowupRequest" in main_py
     assert "chart: dict" in main_py
@@ -448,6 +450,22 @@ def test_relationship_followup_contract_reuses_chart():
     assert "stream_relationship_followup" in followup_section
     assert "generate_relationship_followup_prompt" in relationship_py
     assert "不得重新起卦" in relationship_py
+    assert "现实身份层" in relationship_py
+    assert "情感状态层" in relationship_py
+    assert "关系质量层" in relationship_py
+    assert "用户问题原文不得改写" in relationship_py
+    assert "## 最终结论" in relationship_py
+    assert "## 追问识别" in relationship_py
+    assert "## 同盘回答" in relationship_py
+    assert "六十四卦语义" in relationship_py
+    assert "summarize_hexagram_path" in relationship_py
+    assert "get_hexagram_semantics" in relationship_py
+    assert "本题候选义" in hexagram_py
+    assert "关系语义" in hexagram_py
+    assert "路径摘要" in hexagram_py
+    assert "现实身份层" in relationship_html
+    assert "情感状态层" in relationship_html
+    assert "关系质量层" in relationship_html
     print("PASS: test_relationship_followup_contract_reuses_chart")
 
 
