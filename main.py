@@ -11,6 +11,7 @@ import json
 import os
 import logging
 import uuid
+from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -19,7 +20,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
+from typing import Any, Dict, Optional
 
 # 确保项目根目录在 sys.path 中
 sys.path.insert(0, str(Path(__file__).parent))
@@ -34,6 +35,7 @@ from llm_store import (
     save_provider,
     save_role,
 )
+from reporting import write_generation_report
 from relationship import (
     relationship_divination,
     stream_relationship_followup,
@@ -176,6 +178,116 @@ def make_serializable(obj):
     return str(obj)
 
 
+def snapshot_request_body(payload: Any) -> Dict[str, Any]:
+    if payload is None:
+        return {}
+    if isinstance(payload, dict):
+        return make_serializable(payload)
+    if hasattr(payload, "model_dump"):
+        return make_serializable(payload.model_dump())
+    return {"value": make_serializable(payload)}
+
+
+async def capture_request_snapshot(request: Request) -> dict:
+    raw_body = await request.body()
+    raw_text = raw_body.decode("utf-8", errors="replace") if raw_body else ""
+    raw_json = None
+    if raw_text.strip():
+        try:
+            raw_json = json.loads(raw_text)
+        except json.JSONDecodeError:
+            raw_json = None
+    return {
+        "body_text": raw_text if raw_json is None else "[JSON body captured in body_json]",
+        "body_json": raw_json,
+        "headers": {
+            "content_type": request.headers.get("content-type", ""),
+            "user_agent": request.headers.get("user-agent", ""),
+            "accept_language": request.headers.get("accept-language", ""),
+        },
+        "client": {
+            "host": getattr(getattr(request, "client", None), "host", None),
+            "port": getattr(getattr(request, "client", None), "port", None),
+        },
+        "path": request.url.path,
+        "method": request.method,
+    }
+
+
+def build_report_meta(
+    *,
+    endpoint: str,
+    trace_id: str,
+    request: Request,
+    role: Optional[dict] = None,
+    **extra,
+) -> dict:
+    client = getattr(request, "client", None)
+    meta = {
+        "endpoint": endpoint,
+        "trace_id": trace_id,
+        "path": request.url.path,
+        "method": request.method,
+        "client_host": getattr(client, "host", None),
+        "client_port": getattr(client, "port", None),
+        "user_agent": request.headers.get("user-agent", ""),
+        "accept_language": request.headers.get("accept-language", ""),
+        "content_type": request.headers.get("content-type", ""),
+    }
+    if role:
+        meta["role_name"] = role.get("role_name") or role.get("name")
+        meta["provider_name"] = role.get("provider_name")
+        meta["provider_type"] = role.get("provider_type")
+        meta["model"] = role.get("model")
+        meta["base_url"] = role.get("base_url")
+    meta.update(extra)
+    return meta
+
+
+def _write_report(
+    *,
+    endpoint: str,
+    trace_id: str,
+    status: str,
+    request_raw: Any,
+    request_validated: Any,
+    result: Any = None,
+    role: Optional[dict] = None,
+    meta: Optional[dict] = None,
+    output_text: str = "",
+    error: Optional[str] = None,
+    user_id: Optional[int] = None,
+):
+    path = write_generation_report(
+        endpoint=endpoint,
+        trace_id=trace_id,
+        status=status,
+        request_raw=snapshot_request_body(request_raw),
+        request_validated=snapshot_request_body(request_validated),
+        result=make_serializable(result),
+        role=snapshot_request_body(role),
+        meta=snapshot_request_body(meta),
+        output_text=output_text,
+        error=error,
+        user_id=user_id,
+        occurred_at=datetime.now(),
+    )
+    logger.info("report written trace=%s endpoint=%s path=%s status=%s", trace_id, endpoint, path, status)
+    return path
+
+
+def _write_report_safely(**kwargs):
+    try:
+        return _write_report(**kwargs)
+    except Exception:
+        logger.exception(
+            "Report write failed trace=%s endpoint=%s",
+            kwargs.get("trace_id"),
+            kwargs.get("endpoint"),
+        )
+        return None
+
+
 def require_admin(request: Request, authorization: str = Header(default="")):
     token = os.getenv("SINOMETA_ADMIN_TOKEN", "").strip()
     if not token:
@@ -290,31 +402,119 @@ async def relationship_page():
 # ==================== API 路由 ====================
 
 @app.post("/api/divine")
-async def divine(req: DivineRequest):
+async def divine(req: DivineRequest, request: Request):
     """起盘接口"""
-    result = do_multi_divination(req)
+    trace_id = uuid.uuid4().hex[:8]
+    request_snapshot = await capture_request_snapshot(request)
+    request_validated = req.model_dump()
+    try:
+        result = do_multi_divination(req)
+    except Exception as exc:
+        _write_report_safely(
+            endpoint="divine",
+            trace_id=trace_id,
+            status="error",
+            request_raw=request_snapshot,
+            request_validated=request_validated,
+            error=str(exc),
+            meta=build_report_meta(endpoint="divine", trace_id=trace_id, request=request),
+        )
+        raise
+    _write_report_safely(
+        endpoint="divine",
+        trace_id=trace_id,
+        status="success",
+        request_raw=request_snapshot,
+        request_validated=request_validated,
+        result=result,
+        meta=build_report_meta(endpoint="divine", trace_id=trace_id, request=request),
+    )
     return make_serializable(result)
 
 
 @app.post("/api/relationship/divine")
-async def relationship_divine(req: RelationshipRequest):
+async def relationship_divine(req: RelationshipRequest, request: Request):
     """关系复合盘起盘接口"""
+    trace_id = uuid.uuid4().hex[:8]
+    request_snapshot = await capture_request_snapshot(request)
+    request_validated = req.model_dump()
     try:
         result = relationship_divination(req.model_dump())
-        return make_serializable(result)
     except ValueError as exc:
+        _write_report_safely(
+            endpoint="relationship-divine",
+            trace_id=trace_id,
+            status="error",
+            request_raw=request_snapshot,
+            request_validated=request_validated,
+            error=str(exc),
+            meta=build_report_meta(endpoint="relationship-divine", trace_id=trace_id, request=request),
+        )
         raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        _write_report_safely(
+            endpoint="relationship-divine",
+            trace_id=trace_id,
+            status="error",
+            request_raw=request_snapshot,
+            request_validated=request_validated,
+            error=str(exc),
+            meta=build_report_meta(endpoint="relationship-divine", trace_id=trace_id, request=request),
+        )
+        raise
+    _write_report_safely(
+        endpoint="relationship-divine",
+        trace_id=trace_id,
+        status="success",
+        request_raw=request_snapshot,
+        request_validated=request_validated,
+        result=result,
+        meta=build_report_meta(endpoint="relationship-divine", trace_id=trace_id, request=request),
+    )
+    return make_serializable(result)
 
 
 @app.post("/api/relationship/interpret")
-async def relationship_interpret(req: RelationshipInterpretRequest):
+async def relationship_interpret(req: RelationshipInterpretRequest, request: Request):
     """关系复合盘解读接口（SSE流式）"""
-    role = resolve_active_role(req.role_id)
-    lenient_mode = bool(req.lenient_mode and _looks_local_base_url(role.get("base_url", "")))
-    result = relationship_divination(req.model_dump())
     trace_id = uuid.uuid4().hex[:8]
+    request_snapshot = await capture_request_snapshot(request)
+    request_validated = req.model_dump()
+    role = None
+    result = None
+    try:
+        role = resolve_active_role(req.role_id)
+        lenient_mode = bool(req.lenient_mode and _looks_local_base_url(role.get("base_url", "")))
+        result = relationship_divination(req.model_dump())
+    except HTTPException as exc:
+        _write_report_safely(
+            endpoint="relationship-interpret",
+            trace_id=trace_id,
+            status="error",
+            request_raw=request_snapshot,
+            request_validated=request_validated,
+            error=str(exc.detail),
+            meta=build_report_meta(endpoint="relationship-interpret", trace_id=trace_id, request=request, role=role),
+        )
+        raise
+    except Exception as exc:
+        _write_report_safely(
+            endpoint="relationship-interpret",
+            trace_id=trace_id,
+            status="error",
+            request_raw=request_snapshot,
+            request_validated=request_validated,
+            error=str(exc),
+            meta=build_report_meta(endpoint="relationship-interpret", trace_id=trace_id, request=request, role=role),
+        )
+        raise
+
+    full_text = []
+    stream_status = "success"
+    stream_error = None
 
     def event_stream():
+        nonlocal stream_status, stream_error
         logger.info(
             "LLM stream start trace=%s endpoint=relationship role=%s provider=%s type=%s model=%s base_url=%s lenient=%s",
             trace_id,
@@ -335,29 +535,74 @@ async def relationship_interpret(req: RelationshipInterpretRequest):
                 provider_type=role["provider_type"],
                 lenient_mode=lenient_mode,
             ):
+                full_text.append(token)
                 yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
             logger.info("LLM stream done trace=%s endpoint=relationship", trace_id)
             yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
         except Exception as e:
+            stream_status = "error"
+            stream_error = str(e)
             logger.exception("LLM stream failed trace=%s endpoint=relationship", trace_id)
             yield f"data: {json.dumps({'error': str(e), 'trace_id': trace_id}, ensure_ascii=False)}\n\n"
+        finally:
+            try:
+                _write_report(
+                    endpoint="relationship-interpret",
+                    trace_id=trace_id,
+                    status=stream_status,
+                    request_raw=request_snapshot,
+                    request_validated=request_validated,
+                    result=result,
+                    role=role,
+                    meta=build_report_meta(
+                        endpoint="relationship-interpret",
+                        trace_id=trace_id,
+                        request=request,
+                        role=role,
+                        lenient_mode=lenient_mode,
+                    ),
+                    output_text="".join(full_text),
+                    error=stream_error,
+                )
+            except Exception:
+                logger.exception("Report write failed trace=%s endpoint=relationship-interpret", trace_id)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @app.post("/api/relationship/followup")
-async def relationship_followup(req: RelationshipFollowupRequest):
+async def relationship_followup(req: RelationshipFollowupRequest, request: Request):
     """关系复合盘同盘追问接口（SSE流式）"""
     if not str(req.message or "").strip():
         raise HTTPException(status_code=400, detail="追问或补充事实不能为空")
     if not req.chart:
         raise HTTPException(status_code=400, detail="原始关系复合盘不能为空")
-    role = resolve_active_role(req.role_id)
-    lenient_mode = bool(req.lenient_mode and _looks_local_base_url(role.get("base_url", "")))
-    result = req.chart
     trace_id = uuid.uuid4().hex[:8]
+    request_snapshot = await capture_request_snapshot(request)
+    request_validated = req.model_dump()
+    role = None
+    result = req.chart
+    try:
+        role = resolve_active_role(req.role_id)
+        lenient_mode = bool(req.lenient_mode and _looks_local_base_url(role.get("base_url", "")))
+    except HTTPException as exc:
+        _write_report_safely(
+            endpoint="relationship-followup",
+            trace_id=trace_id,
+            status="error",
+            request_raw=request_snapshot,
+            request_validated=request_validated,
+            error=str(exc.detail),
+            meta=build_report_meta(endpoint="relationship-followup", trace_id=trace_id, request=request, role=role),
+        )
+        raise
+
+    full_text = []
+    stream_status = "success"
+    stream_error = None
 
     def event_stream():
+        nonlocal stream_status, stream_error
         logger.info(
             "LLM stream start trace=%s endpoint=relationship-followup role=%s provider=%s type=%s model=%s base_url=%s lenient=%s",
             trace_id,
@@ -380,12 +625,37 @@ async def relationship_followup(req: RelationshipFollowupRequest):
                 provider_type=role["provider_type"],
                 lenient_mode=lenient_mode,
             ):
+                full_text.append(token)
                 yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
             logger.info("LLM stream done trace=%s endpoint=relationship-followup", trace_id)
             yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
         except Exception as e:
+            stream_status = "error"
+            stream_error = str(e)
             logger.exception("LLM stream failed trace=%s endpoint=relationship-followup", trace_id)
             yield f"data: {json.dumps({'error': str(e), 'trace_id': trace_id}, ensure_ascii=False)}\n\n"
+        finally:
+            try:
+                _write_report(
+                    endpoint="relationship-followup",
+                    trace_id=trace_id,
+                    status=stream_status,
+                    request_raw=request_snapshot,
+                    request_validated=request_validated,
+                    result=result,
+                    role=role,
+                    meta=build_report_meta(
+                        endpoint="relationship-followup",
+                        trace_id=trace_id,
+                        request=request,
+                        role=role,
+                        lenient_mode=lenient_mode,
+                    ),
+                    output_text="".join(full_text),
+                    error=stream_error,
+                )
+            except Exception:
+                logger.exception("Report write failed trace=%s endpoint=relationship-followup", trace_id)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -432,15 +702,45 @@ async def admin_save_role(
 
 
 @app.post("/api/interpret")
-async def interpret(req: InterpretRequest):
+async def interpret(req: InterpretRequest, request: Request):
     """解卦接口（SSE流式）"""
-    role = resolve_active_role(req.role_id)
-    lenient_mode = allow_lenient_mode(req, role)
-
-    result = do_multi_divination(req)
     trace_id = uuid.uuid4().hex[:8]
+    request_snapshot = await capture_request_snapshot(request)
+    request_validated = req.model_dump()
+    role = None
+    try:
+        role = resolve_active_role(req.role_id)
+        lenient_mode = allow_lenient_mode(req, role)
+        result = do_multi_divination(req)
+    except HTTPException as exc:
+        _write_report_safely(
+            endpoint="interpret",
+            trace_id=trace_id,
+            status="error",
+            request_raw=request_snapshot,
+            request_validated=request_validated,
+            error=str(exc.detail),
+            meta=build_report_meta(endpoint="interpret", trace_id=trace_id, request=request, role=role, mode=req.mode),
+        )
+        raise
+    except Exception as exc:
+        _write_report_safely(
+            endpoint="interpret",
+            trace_id=trace_id,
+            status="error",
+            request_raw=request_snapshot,
+            request_validated=request_validated,
+            error=str(exc),
+            meta=build_report_meta(endpoint="interpret", trace_id=trace_id, request=request, role=role, mode=req.mode),
+        )
+        raise
+
+    full_text = []
+    stream_status = "success"
+    stream_error = None
 
     def event_stream():
+        nonlocal stream_status, stream_error
         logger.info(
             "LLM stream start trace=%s endpoint=interpret role=%s provider=%s type=%s model=%s base_url=%s lenient=%s mode=%s",
             trace_id,
@@ -464,26 +764,82 @@ async def interpret(req: InterpretRequest):
                 lenient_mode=lenient_mode,
                 mode=req.mode,
             ):
+                full_text.append(token)
                 yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
             logger.info("LLM stream done trace=%s endpoint=interpret", trace_id)
             yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
         except Exception as e:
+            stream_status = "error"
+            stream_error = str(e)
             logger.exception("LLM stream failed trace=%s endpoint=interpret", trace_id)
             yield f"data: {json.dumps({'error': str(e), 'trace_id': trace_id}, ensure_ascii=False)}\n\n"
+        finally:
+            try:
+                _write_report(
+                    endpoint="interpret",
+                    trace_id=trace_id,
+                    status=stream_status,
+                    request_raw=request_snapshot,
+                    request_validated=request_validated,
+                    result=result,
+                    role=role,
+                    meta=build_report_meta(
+                        endpoint="interpret",
+                        trace_id=trace_id,
+                        request=request,
+                        role=role,
+                        lenient_mode=lenient_mode,
+                        mode=req.mode,
+                    ),
+                    output_text="".join(full_text),
+                    error=stream_error,
+                )
+            except Exception:
+                logger.exception("Report write failed trace=%s endpoint=interpret", trace_id)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @app.post("/api/advice")
-async def advice(req: InterpretRequest):
+async def advice(req: InterpretRequest, request: Request):
     """破局建议接口（SSE流式）"""
-    role = resolve_active_role(req.role_id)
-    lenient_mode = allow_lenient_mode(req, role)
-
-    result = do_multi_divination(req)
     trace_id = uuid.uuid4().hex[:8]
+    request_snapshot = await capture_request_snapshot(request)
+    request_validated = req.model_dump()
+    role = None
+    try:
+        role = resolve_active_role(req.role_id)
+        lenient_mode = allow_lenient_mode(req, role)
+        result = do_multi_divination(req)
+    except HTTPException as exc:
+        _write_report_safely(
+            endpoint="advice",
+            trace_id=trace_id,
+            status="error",
+            request_raw=request_snapshot,
+            request_validated=request_validated,
+            error=str(exc.detail),
+            meta=build_report_meta(endpoint="advice", trace_id=trace_id, request=request, role=role, mode=req.mode),
+        )
+        raise
+    except Exception as exc:
+        _write_report_safely(
+            endpoint="advice",
+            trace_id=trace_id,
+            status="error",
+            request_raw=request_snapshot,
+            request_validated=request_validated,
+            error=str(exc),
+            meta=build_report_meta(endpoint="advice", trace_id=trace_id, request=request, role=role, mode=req.mode),
+        )
+        raise
+
+    full_text = []
+    stream_status = "success"
+    stream_error = None
 
     def event_stream():
+        nonlocal stream_status, stream_error
         logger.info(
             "LLM stream start trace=%s endpoint=advice role=%s provider=%s type=%s model=%s base_url=%s lenient=%s mode=%s",
             trace_id,
@@ -507,12 +863,38 @@ async def advice(req: InterpretRequest):
                 lenient_mode=lenient_mode,
                 mode=req.mode,
             ):
+                full_text.append(token)
                 yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
             logger.info("LLM stream done trace=%s endpoint=advice", trace_id)
             yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
         except Exception as e:
+            stream_status = "error"
+            stream_error = str(e)
             logger.exception("LLM stream failed trace=%s endpoint=advice", trace_id)
             yield f"data: {json.dumps({'error': str(e), 'trace_id': trace_id}, ensure_ascii=False)}\n\n"
+        finally:
+            try:
+                _write_report(
+                    endpoint="advice",
+                    trace_id=trace_id,
+                    status=stream_status,
+                    request_raw=request_snapshot,
+                    request_validated=request_validated,
+                    result=result,
+                    role=role,
+                    meta=build_report_meta(
+                        endpoint="advice",
+                        trace_id=trace_id,
+                        request=request,
+                        role=role,
+                        lenient_mode=lenient_mode,
+                        mode=req.mode,
+                    ),
+                    output_text="".join(full_text),
+                    error=stream_error,
+                )
+            except Exception:
+                logger.exception("Report write failed trace=%s endpoint=advice", trace_id)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 

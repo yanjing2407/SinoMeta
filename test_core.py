@@ -481,6 +481,72 @@ def test_sqlite_busy_timeout():
     print("PASS: test_sqlite_busy_timeout")
 
 
+def test_generation_report_persists_details():
+    import os
+    import tempfile
+    from pathlib import Path
+
+    from reporting import write_generation_report
+
+    previous = os.environ.get("SINOMETA_REPORT_PATH")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        os.environ["SINOMETA_REPORT_PATH"] = tmpdir
+        try:
+            report_path = write_generation_report(
+                endpoint="divine",
+                trace_id="abc12345",
+                status="success",
+                user_id=7,
+                request_raw={
+                    "event": "测试起卦",
+                    "year": 2026,
+                    "month": 6,
+                    "day": 19,
+                    "hour": 8,
+                    "minute": 0,
+                    "api_key": "secret-token",
+                },
+                request_validated={
+                    "event": "测试起卦",
+                    "year": 2026,
+                    "month": 6,
+                    "day": 19,
+                    "hour": 8,
+                    "minute": 0,
+                },
+                result={
+                    "事件": "测试起卦",
+                    "时空坐标": {"时间": "2026-06-19 08:00", "经度": 116.4, "纬度": 39.9},
+                },
+                role={
+                    "role_name": "玄机真人",
+                    "provider_name": "DeepSeek",
+                    "provider_type": "openai_compatible",
+                    "model": "deepseek-chat",
+                    "base_url": "https://api.deepseek.com",
+                    "api_key": "secret-token",
+                },
+                meta={"mode": "expert", "lenient_mode": False},
+                output_text="最终解读",
+            )
+            content = Path(report_path).read_text(encoding="utf-8")
+            assert "trace_id: abc12345" in content
+            assert "endpoint: divine" in content
+            assert "玄机真人" in content
+            assert "最终解读" in content
+            assert "api_key" in content
+            assert "secret-token" not in content
+            assert "user_7" in str(report_path)
+            assert "mode" in content
+            assert "lenient_mode" in content
+        finally:
+            if previous is None:
+                os.environ.pop("SINOMETA_REPORT_PATH", None)
+            else:
+                os.environ["SINOMETA_REPORT_PATH"] = previous
+    print("PASS: test_generation_report_persists_details")
+
+
 def test_jie_qi_month():
     from calendar_utils import get_jie_qi_month
 
@@ -969,6 +1035,7 @@ if __name__ == '__main__':
     test_relationship_stale_child_context_conflict()
     test_relationship_followup_contract_reuses_chart()
     test_sqlite_busy_timeout()
+    test_generation_report_persists_details()
     test_jie_qi_month()
     test_true_solar_time()
     test_trigram_mapping()
