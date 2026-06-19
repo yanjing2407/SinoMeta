@@ -133,6 +133,7 @@ class RelationshipRequest(BaseModel):
 class RelationshipInterpretRequest(RelationshipRequest):
     role_id: Optional[int] = None
     lenient_mode: bool = False
+    detail_mode: str = "expert"
 
 
 class RelationshipFollowupRequest(BaseModel):
@@ -141,6 +142,7 @@ class RelationshipFollowupRequest(BaseModel):
     history: Optional[list] = None
     role_id: Optional[int] = None
     lenient_mode: bool = False
+    detail_mode: str = "expert"
 
 
 class ProviderPayload(BaseModel):
@@ -516,7 +518,7 @@ async def relationship_interpret(req: RelationshipInterpretRequest, request: Req
     def event_stream():
         nonlocal stream_status, stream_error
         logger.info(
-            "LLM stream start trace=%s endpoint=relationship role=%s provider=%s type=%s model=%s base_url=%s lenient=%s",
+            "LLM stream start trace=%s endpoint=relationship role=%s provider=%s type=%s model=%s base_url=%s lenient=%s detail_mode=%s",
             trace_id,
             role.get("role_name"),
             role.get("provider_name"),
@@ -524,6 +526,7 @@ async def relationship_interpret(req: RelationshipInterpretRequest, request: Req
             role.get("model"),
             role.get("base_url"),
             lenient_mode,
+            req.detail_mode,
         )
         try:
             for token in stream_relationship_interpret(
@@ -534,6 +537,7 @@ async def relationship_interpret(req: RelationshipInterpretRequest, request: Req
                 system_prompt=role["system_prompt"],
                 provider_type=role["provider_type"],
                 lenient_mode=lenient_mode,
+                detail_mode=req.detail_mode,
             ):
                 full_text.append(token)
                 yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
@@ -560,6 +564,7 @@ async def relationship_interpret(req: RelationshipInterpretRequest, request: Req
                         request=request,
                         role=role,
                         lenient_mode=lenient_mode,
+                        detail_mode=req.detail_mode,
                     ),
                     output_text="".join(full_text),
                     error=stream_error,
@@ -604,7 +609,7 @@ async def relationship_followup(req: RelationshipFollowupRequest, request: Reque
     def event_stream():
         nonlocal stream_status, stream_error
         logger.info(
-            "LLM stream start trace=%s endpoint=relationship-followup role=%s provider=%s type=%s model=%s base_url=%s lenient=%s",
+            "LLM stream start trace=%s endpoint=relationship-followup role=%s provider=%s type=%s model=%s base_url=%s lenient=%s detail_mode=%s",
             trace_id,
             role.get("role_name"),
             role.get("provider_name"),
@@ -612,6 +617,7 @@ async def relationship_followup(req: RelationshipFollowupRequest, request: Reque
             role.get("model"),
             role.get("base_url"),
             lenient_mode,
+            req.detail_mode,
         )
         try:
             for token in stream_relationship_followup(
@@ -624,6 +630,7 @@ async def relationship_followup(req: RelationshipFollowupRequest, request: Reque
                 system_prompt=role["system_prompt"],
                 provider_type=role["provider_type"],
                 lenient_mode=lenient_mode,
+                detail_mode=req.detail_mode,
             ):
                 full_text.append(token)
                 yield f"data: {json.dumps({'token': token}, ensure_ascii=False)}\n\n"
@@ -650,6 +657,7 @@ async def relationship_followup(req: RelationshipFollowupRequest, request: Reque
                         request=request,
                         role=role,
                         lenient_mode=lenient_mode,
+                        detail_mode=req.detail_mode,
                     ),
                     output_text="".join(full_text),
                     error=stream_error,

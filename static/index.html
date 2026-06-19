@@ -59,6 +59,7 @@ a{color:var(--gold)}
 .btn-primary:hover{background:#f0c97a}
 .btn-red{border-color:var(--red);color:#e88}
 .btn-red:hover{background:var(--red);color:#fff}
+.btn-sm{padding:4px 10px;font-size:.78rem}
 .btn:disabled{opacity:.35;cursor:not-allowed}
 .mode-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--bg2)}
 .mode-row.disabled{opacity:.55}
@@ -497,6 +498,7 @@ async function streamSSE(url, body, el){
         }
         if(obj.token){
           fullText+=obj.token;
+          el.dataset.copyText=fullText;
           if(typeof marked!=='undefined'&&typeof DOMPurify!=='undefined'){el.innerHTML=DOMPurify.sanitize(marked.parse(fullText))+'<span class="cursor"></span>'}
           else{el.innerHTML=fullText.replace(/\n/g,'<br>')+'<span class="cursor"></span>'}
         }
@@ -505,6 +507,7 @@ async function streamSSE(url, body, el){
   }
   if(streamError) throw new Error(streamError);
   fullText=stripReasoningText(fullText);
+  el.dataset.copyText=fullText;
   if(typeof marked!=='undefined'&&typeof DOMPurify!=='undefined'){el.innerHTML=DOMPurify.sanitize(marked.parse(fullText))}
   else{el.innerHTML=fullText.replace(/\n/g,'<br>')}
   return fullText;
@@ -751,7 +754,7 @@ async function doAdvice2(){
 function createHistoryCard(title){
   const wrapper=document.createElement('div');
   wrapper.className='card';
-  wrapper.innerHTML=`<div class="card-title" onclick="toggleCard(this)"><span>${escapeHTML(title)}</span><span class="arrow">▼</span></div><div class="card-body"><div class="ai-result"><span class="cursor"></span></div></div>`;
+  wrapper.innerHTML=`<div class="card-title" onclick="toggleCard(this)"><span>${escapeHTML(title)}</span><span class="arrow">▼</span></div><div class="card-body"><div style="text-align:right;margin-bottom:8px"><button class="btn btn-sm" onclick="copyHistoryInterpret(this)">复制解读</button></div><div class="ai-result"><span class="cursor"></span></div></div>`;
   $('interpretHistory').prepend(wrapper);
   wrapper.scrollIntoView({behavior:'smooth'});
   return wrapper;
@@ -811,6 +814,35 @@ async function copyDivinationText(){
   }catch(e){
     toast('复制失败，请手动选择导出文本');
   }
+}
+
+async function copyText(text,successMsg='已复制'){
+  if(!text){toast('暂无内容');return}
+  try{
+    if(navigator.clipboard&&window.isSecureContext){
+      await navigator.clipboard.writeText(text);
+    }else{
+      const ta=document.createElement('textarea');
+      ta.value=text;
+      ta.style.position='fixed';
+      ta.style.left='-9999px';
+      ta.style.top='0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    toast(successMsg);
+  }catch(e){
+    toast('复制失败，请手动选择文本');
+  }
+}
+
+function copyHistoryInterpret(btn){
+  const card=btn.closest('.card');
+  const el=card?.querySelector('.ai-result');
+  copyText(el?.dataset.copyText||el?.innerText||'', '已复制解读');
 }
 
 function exportBazi(data){

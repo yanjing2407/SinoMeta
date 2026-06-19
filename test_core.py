@@ -442,6 +442,7 @@ def test_relationship_followup_contract_reuses_chart():
     relationship_html = Path("static/relationship.html").read_text(encoding="utf-8")
 
     assert "class RelationshipFollowupRequest" in main_py
+    assert "detail_mode: str = \"expert\"" in main_py
     assert "chart: dict" in main_py
     assert "message: str" in main_py
     assert "relationship_divination(req.model_dump())" in main_py
@@ -449,15 +450,17 @@ def test_relationship_followup_contract_reuses_chart():
     assert "relationship_divination(" not in followup_section
     assert "stream_relationship_followup" in followup_section
     assert "generate_relationship_followup_prompt" in relationship_py
-    assert "不得重新起卦" in relationship_py
-    assert "现实身份层" in relationship_py
-    assert "情感状态层" in relationship_py
-    assert "关系质量层" in relationship_py
-    assert "用户问题原文不得改写" in relationship_py
-    assert "## 最终结论" in relationship_py
-    assert "## 追问识别" in relationship_py
-    assert "## 同盘回答" in relationship_py
-    assert "六十四卦语义" in relationship_py
+    assert "关系盘证据包" in relationship_py
+    assert "_relationship_evidence_pack" in relationship_py
+    assert "_compact_prompt_value" in relationship_py
+    assert "原始盘优先于元解释器" in relationship_py
+    assert "现实身份层、情感状态层、关系质量层" in relationship_py
+    assert "本轮追问/补充事实" in relationship_py
+    assert "已有追问记录" in relationship_py
+    assert "不可覆盖原盘" in relationship_py
+    assert "输出格式：" in relationship_py
+    assert "RELATIONSHIP_DETAILED_PROMPT" in relationship_py
+    assert "detail_mode" in relationship_py
     assert "summarize_hexagram_path" in relationship_py
     assert "get_hexagram_semantics" in relationship_py
     assert "本题候选义" in hexagram_py
@@ -466,8 +469,92 @@ def test_relationship_followup_contract_reuses_chart():
     assert "现实身份层" in relationship_html
     assert "情感状态层" in relationship_html
     assert "关系质量层" in relationship_html
+    assert "术数详断" in relationship_html
+    assert "detail_mode:relationshipDetailMode" in relationship_html
     print("PASS: test_relationship_followup_contract_reuses_chart")
 
+
+def test_relationship_prompt_longform_expert():
+    from relationship import (
+        RELATIONSHIP_FOLLOWUP_MAX_TOKENS,
+        RELATIONSHIP_INTERPRET_MAX_TOKENS,
+        generate_relationship_followup_prompt,
+        generate_relationship_prompt,
+        _build_relationship_prompt,
+        relationship_divination,
+    )
+
+    payload = {
+        "event": "绠楃畻涓や釜鍛戒富浠€涔堝叧绯?",
+        "context": "杩欐槸鎴戝拰鍎垮瓙",
+        "relation_type": "",
+        "first_subject": {
+            "gender": "male",
+            "birth_year": 1982,
+            "birth_month": 11,
+            "birth_day": 12,
+            "birth_hour": 13,
+            "birth_minute": 15,
+        },
+        "second_subject": {
+            "gender": "male",
+            "birth_year": 2010,
+            "birth_month": 8,
+            "birth_day": 15,
+            "birth_hour": 1,
+            "birth_minute": 0,
+        },
+        "year": 2026,
+        "month": 6,
+        "day": 16,
+        "hour": 6,
+        "minute": 54,
+        "longitude": 118.024093,
+        "latitude": 36.814259,
+    }
+    result = relationship_divination(payload)
+    prompt = generate_relationship_prompt(result)
+    detailed_prompt = _build_relationship_prompt(result, detail_mode="detailed")
+    followup_prompt = generate_relationship_followup_prompt(
+        result,
+        "杩欐槸鎴戝拰鍎垮瓙锛岄噸鐐圭湅鐓ф姢璐ｄ换杩樻槸浜插瘑鐗佃繛锛?",
+        history=[{"role": "assistant", "content": "鍏堢湅鍘熺洏銆?"}],
+        detail_mode="detailed",
+    )
+
+    assert RELATIONSHIP_INTERPRET_MAX_TOKENS >= 3000
+    assert RELATIONSHIP_FOLLOWUP_MAX_TOKENS >= 2000
+    assert "长文型专家" in prompt
+    assert "关系盘证据包" in prompt
+    assert "# 【问题与关系识别】" in prompt
+    assert "# 【第一命主个体盘】" in prompt
+    assert "# 【第二命主个体盘】" in prompt
+    assert "# 【当前问事盘：六爻】" in prompt
+    assert "不虚美、不隐恶" in prompt
+    assert "每个术数段至少写4-6句" in prompt
+    assert "现实身份层、情感状态层、关系质量层" in prompt
+    assert "八字合盘" in prompt
+    assert "关系复合卦" in prompt
+    assert "# 【最终判断】" in prompt
+    assert "术数详断模式" not in prompt
+    assert "每段控制在1-2句" not in prompt
+    assert "术数详断模式" in detailed_prompt
+    assert "关键盘面依据 / 术数象意 / 吉凶与风险 / 对两人关系的独立结论" in detailed_prompt
+    assert "四课三传" in detailed_prompt
+
+    assert "长文型专家" in followup_prompt
+    assert "术数详断模式" in followup_prompt
+    assert "本轮追问/补充事实" in followup_prompt
+    assert "已有追问记录" in followup_prompt
+    assert "不可覆盖原盘" in followup_prompt
+    assert "关系盘证据包" in followup_prompt
+    assert "# 【交叉验证】" in followup_prompt
+    assert "# 【行动建议】" in followup_prompt
+    assert len(prompt) > 1000
+    assert len(followup_prompt) > 1000
+    assert len(prompt) < 18000
+    assert len(followup_prompt) < 22000
+    print("PASS: test_relationship_prompt_longform_expert")
 
 def test_sqlite_busy_timeout():
     from llm_store import _connect
@@ -1034,6 +1121,7 @@ if __name__ == '__main__':
     test_relationship_parent_child_prior_suppresses_romance()
     test_relationship_stale_child_context_conflict()
     test_relationship_followup_contract_reuses_chart()
+    test_relationship_prompt_longform_expert()
     test_sqlite_busy_timeout()
     test_generation_report_persists_details()
     test_jie_qi_month()

@@ -634,13 +634,21 @@ def _looks_local_url(url: str) -> bool:
     )
 
 
-def _build_openai_payload(messages, model: str, stream: bool, disable_thinking: bool = False) -> bytes:
+def _build_openai_payload(
+    messages,
+    model: str,
+    stream: bool,
+    disable_thinking: bool = False,
+    max_tokens: int | None = None,
+) -> bytes:
     payload = {
         "model": model,
         "messages": messages,
         "temperature": 0.7,
         "stream": stream,
     }
+    if max_tokens is not None:
+        payload["max_tokens"] = int(max_tokens)
     if disable_thinking:
         payload["reasoning_effort"] = "none"
         payload["chat_template_kwargs"] = {"enable_thinking": False}
@@ -683,8 +691,14 @@ def _extract_openai_content(data: dict) -> str:
     return delta.get("content") or message.get("content") or choice.get("text") or ""
 
 
-def _iter_openai_stream(url: str, api_key: str, model: str, messages):
-    payload = _build_openai_payload(messages, model, stream=True, disable_thinking=_looks_local_url(url))
+def _iter_openai_stream(url: str, api_key: str, model: str, messages, max_tokens: int | None = None):
+    payload = _build_openai_payload(
+        messages,
+        model,
+        stream=True,
+        disable_thinking=_looks_local_url(url),
+        max_tokens=max_tokens,
+    )
     with _openai_request(url, payload, api_key) as resp:
         for raw_line in resp:
             line = raw_line.decode("utf-8", errors="ignore").strip()
@@ -700,15 +714,21 @@ def _iter_openai_stream(url: str, api_key: str, model: str, messages):
                 yield content
 
 
-def _complete_openai_once(url: str, api_key: str, model: str, messages) -> str:
-    payload = _build_openai_payload(messages, model, stream=False, disable_thinking=_looks_local_url(url))
+def _complete_openai_once(url: str, api_key: str, model: str, messages, max_tokens: int | None = None) -> str:
+    payload = _build_openai_payload(
+        messages,
+        model,
+        stream=False,
+        disable_thinking=_looks_local_url(url),
+        max_tokens=max_tokens,
+    )
     with _openai_request(url, payload, api_key) as resp:
         text = resp.read().decode("utf-8", errors="ignore")
     data = json.loads(text)
     return _extract_openai_content(data)
 
 
-def _stream_openai_compatible(messages, api_key: str, base_url: str, model: str):
+def _stream_openai_compatible(messages, api_key: str, base_url: str, model: str, max_tokens: int | None = None):
     urls = _openai_chat_url_candidates(base_url)
     last_error = None
 
@@ -716,7 +736,7 @@ def _stream_openai_compatible(messages, api_key: str, base_url: str, model: str)
         yielded = False
         try:
             logger.info("OpenAI compatible stream request url=%s model=%s", url, model)
-            for token in _iter_openai_stream(url, api_key, model, messages):
+            for token in _iter_openai_stream(url, api_key, model, messages, max_tokens=max_tokens):
                 yielded = True
                 yield token
             if yielded:
@@ -735,7 +755,7 @@ def _stream_openai_compatible(messages, api_key: str, base_url: str, model: str)
 
         try:
             logger.info("OpenAI compatible non-stream fallback request url=%s model=%s", url, model)
-            content = _complete_openai_once(url, api_key, model, messages)
+            content = _complete_openai_once(url, api_key, model, messages, max_tokens=max_tokens)
             if content:
                 yield content
                 return
@@ -753,16 +773,16 @@ def _stream_openai_compatible(messages, api_key: str, base_url: str, model: str)
     raise RuntimeError(f"OpenAI兼容接口请求失败：{last_error}；已尝试路径：{tried}")
 
 
-def _stream_ollama_native(messages, api_key: str, base_url: str, model: str):
+def _stream_ollama_native(messages, api_key: str, base_url: str, model: str, num_predict: int | None = None):
     url = base_url.rstrip("/") + "/api/chat"
-    payload = json.dumps(
-        {
-            "model": model,
-            "messages": messages,
-            "stream": True,
-        },
-        ensure_ascii=False,
-    ).encode("utf-8")
+    payload_data = {
+        "model": model,
+        "messages": messages,
+        "stream": True,
+    }
+    if num_predict is not None:
+        payload_data["options"] = {"num_predict": int(num_predict)}
+    payload = json.dumps(payload_data, ensure_ascii=False).encode("utf-8")
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"

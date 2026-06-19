@@ -39,6 +39,18 @@ from ziwei import pa_pan as ziwei_pa_pan
 
 logger = logging.getLogger("sinometa")
 
+RELATIONSHIP_INTERPRET_MAX_TOKENS = 8192
+RELATIONSHIP_FOLLOWUP_MAX_TOKENS = 4096
+
+RELATIONSHIP_LONGFORM_PROMPT = """【关系合盘长文型专家】
+这是长文型专家模式，不要写成摘要。
+你要先总览盘面，再逐术数展开，重点回答：盘面是什么样子、卦象/星象/门象代表什么、结论是什么、为什么会得到这个结论。
+每个术数段至少写4-6句，必须包含盘面状态、象意含义、证据链和独立判断。
+现实身份层、情感状态层、关系质量层必须分开写，最后再做综合验证。
+术数讲究“不虚美、不隐恶”：吉则言吉，凶则言凶；有阻滞、消耗、第三方、冷淡、断裂风险、权责失衡时必须直说。
+不得为了安慰用户而淡化盘面，也不得用泛泛的伦理话术覆盖术数判断；但术数结论不能当作法律身份、医学事实或现实证据证明。
+总字数建议2500-4500字，盘面材料充分时可更长，不要压缩成三四句摘要。"""
+
 
 GAN_HE = {
     frozenset(("甲", "己")): "甲己合土",
@@ -2413,175 +2425,260 @@ def _method_section_template(method: str, summary: str, evidence: List[str], con
         f"**论断**：**{conclusion or '暂无明确结论'}**\n"
     )
 
-def generate_relationship_prompt(compound_result):
-    result_text = json.dumps(compound_result, ensure_ascii=False, indent=2, default=str)
-    question = compound_result.get('问题', '')
-    meta = compound_result.get('元解释器', {})
-    raw_points = compound_result.get('原始盘要点', {})
-    risk = compound_result.get('综合验证', {}).get('高风险主题', {})
-    task = meta.get('问题识别', {})
-    user_conc = meta.get('用户结论', {})
-    layers = meta.get('任务语义汇总', {})
-    prior = meta.get('关系先验', {})
-    context = compound_result.get('补充信息', '')
-
-    top_relation = user_conc.get('最像关系', {})
-    ranking = user_conc.get('候选关系排行', [])
-    not_like = user_conc.get('不像关系', [])
-    direct_answer = user_conc.get('直接回答', '')
-    current_state = user_conc.get('当前状态', '')
-    stability = user_conc.get('长期稳定性', '')
-    trend = user_conc.get('发展趋势', '')
-    identity_layer = user_conc.get('现实身份层', '')
-    emotional_layer = user_conc.get('情感状态层', '')
-    quality_layer = user_conc.get('关系质量层', '')
-
-    ranking_text = ''
-    if ranking:
-        ranking_lines = []
-        for i, r in enumerate(ranking[:3]):
-            evidence_text = '；'.join(r.get('依据', [])[:2])
-            ranking_lines.append(
-                '  %d. %s（%s，强度%s）—— %s' % (i + 1, r['类型'], r['等级'], r['强度'], evidence_text)
+def _compact_prompt_value(value: Any, *, depth: int = 4, dict_limit: int = 8, list_limit: int = 3, string_limit: int = 80) -> Any:
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if len(text) <= string_limit:
+            return text
+        return text[: max(0, string_limit - 1)] + "…"
+    if isinstance(value, dict):
+        if depth <= 0:
+            return _compact_prompt_value(json.dumps(value, ensure_ascii=False, default=str), depth=0, dict_limit=dict_limit, list_limit=list_limit, string_limit=string_limit)
+        compact: Dict[str, Any] = {}
+        for index, (key, item) in enumerate(value.items()):
+            if index >= dict_limit:
+                compact["…"] = f"已省略{max(0, len(value) - dict_limit)}项"
+                break
+            compact[str(key)] = _compact_prompt_value(
+                item,
+                depth=depth - 1,
+                dict_limit=dict_limit,
+                list_limit=list_limit,
+                string_limit=string_limit,
             )
-        ranking_text = '\n'.join(ranking_lines)
+        return compact
+    if isinstance(value, (list, tuple)):
+        items = list(value)
+        compact_list = [
+            _compact_prompt_value(
+                item,
+                depth=depth - 1,
+                dict_limit=dict_limit,
+                list_limit=list_limit,
+                string_limit=string_limit,
+            )
+            for item in items[:list_limit]
+        ]
+        if len(items) > list_limit:
+            compact_list.append(f"…已省略{len(items) - list_limit}项")
+        return compact_list
+    return _compact_prompt_value(str(value), depth=0, dict_limit=dict_limit, list_limit=list_limit, string_limit=string_limit)
 
-    layer_text = ''
-    for layer_name in ['事实层', '关系性质层', '结构稳定层', '动态行为层', '趋势概率层', '底层因果层']:
-        l = layers.get(layer_name, {})
-        tags = '、'.join(l.get('主要标签', [])[:3]) or '信号不集中'
-        layer_text += '  %s：%s\n' % (layer_name, tags)
 
-    risk_hits = risk.get('命中类别', [])
-    risk_note = ''
-    if risk_hits:
-        risk_note = '⚠ 本问题涉及' + '、'.join(risk_hits) + '，需提示用户以现实证据为准。'
+def _brief_json(value: Any, max_chars: int = 900) -> str:
+    if value in (None, "", [], {}):
+        return "未见"
+    if isinstance(value, str):
+        text = value.strip()
+    else:
+        text = json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str)
+    if len(text) <= max_chars:
+        return text
+    return text[: max(0, max_chars - 1)] + "…"
 
-    not_like_text = '、'.join(not_like) if not_like else '无明显排除项'
-    task_name = task.get('任务名称', '')
-    task_desc = task.get('任务说明', '')
-    top_type = top_relation.get('类型', '')
-    top_level = top_relation.get('等级', '')
-    top_strength = top_relation.get('强度', '')
 
-    prompt = '你是一位传统术数关系合盘解读助手。请做全息解盘：先从八字、紫微、六爻、奇门、梅花、大六壬、关系复合卦逐层展开，最后再给综合结论。\n'
-    prompt += '\n'
-    prompt += '# 用户问题\n'
-    prompt += question + '\n'
-    if context:
-        prompt += '补充事实/追问回答：' + context + '\n'
-    prompt += '\n'
-    prompt += '# 系统任务摘要（只作导航，必须用原始盘核验）\n'
-    prompt += '问题类型：' + task_name + '（' + task_desc + '）\n'
-    prompt += '关系判断：' + top_type + '（可信度等级：' + top_level + '，强度：' + str(top_strength) + '）\n'
-    prompt += '不像关系：' + not_like_text + '\n'
-    prompt += '直接回答：' + direct_answer + '\n'
-    prompt += '现实身份层：' + identity_layer + '\n'
-    prompt += '情感状态层：' + emotional_layer + '\n'
-    prompt += '关系质量层：' + quality_layer + '\n'
-    prompt += '当前状态：' + current_state + '\n'
-    prompt += '长期稳定性：' + stability + '\n'
-    prompt += '发展趋势：' + trend + '\n'
-    prompt += '关系先验：' + json.dumps(prior, ensure_ascii=False, default=str) + '\n'
-    prompt += '注意：以上摘要不是最终判词。若换第二命主后八字、紫微、复合卦、大六壬行年出现差异，必须围绕这些差异重判，不得套用上一盘或固定模板。\n'
-    prompt += '\n'
-    prompt += '# 原始盘要点（解读主依据，必须优先读取）\n'
-    prompt += json.dumps(raw_points, ensure_ascii=False, indent=2, default=str) + '\n'
-    prompt += '\n'
-    prompt += '# 候选关系排行\n'
-    prompt += ranking_text + '\n'
-    prompt += '\n'
-    prompt += '# 主框架与关系库参考\n'
-    prompt += json.dumps(meta.get('用户结论', {}).get('主框架', {}), ensure_ascii=False, indent=2, default=str) + '\n'
-    prompt += json.dumps(_taxonomy_summary(), ensure_ascii=False, indent=2, default=str) + '\n'
-    prompt += '\n'
-    prompt += '# 信息缺口与追问建议\n'
-    prompt += json.dumps(meta.get('用户结论', {}).get('信息缺口', []), ensure_ascii=False, indent=2, default=str) + '\n'
-    prompt += json.dumps(meta.get('用户结论', {}).get('推荐追问', []), ensure_ascii=False, indent=2, default=str) + '\n'
-    prompt += '\n'
-    prompt += '# 六层语义标签\n'
-    prompt += layer_text
-    prompt += '\n'
-    prompt += '# 各术数关键信号\n'
-    prompt += _format_method_signals(meta) + '\n'
-    prompt += '\n'
-    prompt += '# 完整排盘数据\n'
-    prompt += result_text + '\n'
-    prompt += '\n'
-    prompt += risk_note + '\n'
-    prompt += '\n'
-    prompt += '# 硬性规则\n'
-    prompt += '1. 不要开头先给最终结论；先逐盘解读，最后集中给综合结论。\n'
-    prompt += '2. 原始盘要点和完整排盘是最高优先级；元解释器只作任务调度和权重参考，不能压过原始盘差异。\n'
-    prompt += '3. 如果元解释器摘要与原始排盘冲突，必须以原始排盘为准，并说明“按原盘看应修正为……”。\n'
-    prompt += '4. 禁止编造原盘没有的字段：不得写错四柱、日主、卦名、世应、动爻、三传、复合卦。\n'
-    prompt += '5. 未声明现实关系时，只能说“盘面关系画像”，不能证明现实身份；但也不能反向否定现实身份，例如不能写“不是夫妻/不是公开伴侣”。\n'
-    prompt += '6. 每一行结论最多给两个判断，不要一串标签。\n'
-    prompt += '7. 八字、紫微、六爻、奇门、梅花、大六壬、关系复合卦都要单独成段分析。\n'
-    prompt += '8. 专业术语可以出现，但每个术语后要翻译成人话。\n'
-    prompt += '9. 如果短期状态与长期结构不一致，直接说“当前如何、长期如何”，不要和稀泥。\n'
-    prompt += '10. 输出要信息充分，建议 1200-2000 字；不要只写三小段。\n'
-    prompt += '11. 六爻、奇门、梅花属于当前问事盘；只换第二命主生日时，它们不变不能证明两段关系一样。关系性质必须重点核验八字合盘、紫微合盘、关系复合卦和大六壬第二命主行年。\n'
-    prompt += '12. 最终结论必须分成三层：“现实身份层 / 情感状态层 / 关系质量层”。关系质量标签不得覆盖现实身份标签；冲突、消耗、阻滞只能说明质量，不能写成“不是夫妻/不是伴侣”。\n'
-    prompt += '13. 如果身份、责任来源或阻滞来源不能确认，必须列出信息缺口和一个定向追问卦问题；追问卦只用于消歧，不能反客为主推翻原盘结构。\n'
-    prompt += '14. 若关系先验显示“大年龄差/代际年龄差/同性且未声明婚恋/声明亲子”，六爻妻财、官鬼、六合、天后等象必须优先翻译为资源、责任、照护、管束、依赖、权责或往来；除非补充事实明确声明婚恋，不得默认写成暧昧、恋人、男女朋友。\n'
-    prompt += '15. 若补充事实或用户声明已经给出现实关系（如儿子、夫妻、同事），不得用盘面反向否定现实身份；只分析这段关系的状态、质量、问题和趋势。\n'
-    prompt += '16. 若补充事实与命主性别或年龄顺序冲突，优先判定为上一盘上下文残留或输入未清理，不得继续沿用冲突的亲缘/性别称谓。\n'
-    prompt += '17. 原始盘要点中的“六十四卦语义”是候选义筛选器：必须结合问事类型、世应/体用/动爻和其他术数，只取 2-3 个最强解释，不得机械照抄全部候选义。\n'
-    prompt += '18. 未声明现实关系时，也必须自动判断情感情况：明确写“亲密牵连明显/有一定吸引/情感弱而事务强/偏照护责任”等，不得只写冲突或结构。\n'
-    prompt += '19. 用户问题原文不得改写、净化或替换；即使表达粗俗，也按原文识别并直接回答，但结论必须保留双方自愿、现实边界和风险提示。\n'
-    prompt += '20. 输出格式必须稳定：每段只用“## 标题 / **内容：** / **论断：**”三层写；不要再混用【标题】；“论断”必须加粗，且每段不超过 2 个结论句。\n'
-    prompt += '\n'
-    prompt += '# 输出\n'
-    prompt += '## 问题识别\n**内容：** 简要说明本题问的是什么，不超过两行。\n**论断：** **只给任务类型和判定边界。**\n'
-    prompt += '## 八字合盘\n**内容：** 长期结构、冲合刑害、稳定性。\n**论断：** **写清主象与辅象，不要只报术语。**\n'
-    prompt += '## 紫微合盘\n**内容：** 命宫/夫妻宫牵动、人生结构和关系质量。\n**论断：** **优先说明宫位牵动和关系轴心。**\n'
-    prompt += '## 六爻\n**内容：** 当前事实状态、谁主动、谁保留、关系是否有变化。\n**论断：** **直接给当前层的判断。**\n'
-    prompt += '## 奇门遁甲\n**内容：** 行为路径、阻力、暗线、主动被动。\n**论断：** **说明卡点和推进方向。**\n'
-    prompt += '## 梅花易数\n**内容：** 趋势概率、关系是否向合或需变革。\n**论断：** **说明趋势，不要泛泛而谈。**\n'
-    prompt += '## 大六壬\n**内容：** 过程因果、起因-发展-结果链条。\n**论断：** **突出过程线而不是术语堆叠。**\n'
-    prompt += '## 关系复合卦\n**内容：** 双人关系场校验。\n**论断：** **说明关系场是增益、阻滞还是消耗。**\n'
-    prompt += '## 综合验证\n**内容：** 把各术数合在一起，说明哪些是主象、哪些是辅象、哪些是风险。\n**论断：** **只保留最关键的合参结论。**\n'
-    prompt += '## 最终结论\n**内容：** 必须分行写：现实身份层、情感状态层、关系质量层、当前状态、长期稳定性、趋势。\n**论断：** **用一句话给最终主判断，再用一句话给现实边界。**\n'
-    prompt += '## 信息缺口与追问\n**内容：** 如果仍有歧义，列出需要补证的点和推荐追问卦问题。\n**论断：** **只给最必要的追问。**\n'
-    prompt += '## 建议\n**内容：** 给 3-5 条具体建议。\n**论断：** **建议要短、具体、可执行。**\n'
-    return prompt
+def _safe_text(value: Any, default: str = "未见") -> str:
+    text = str(value or "").strip()
+    return text or default
+
+
+def _format_pillars(pillars: Dict[str, Any]) -> str:
+    if not isinstance(pillars, dict):
+        return "未见"
+    return "，".join(f"{pos}{pillars.get(pos, '')}" for pos in ("年柱", "月柱", "日柱", "时柱") if pillars.get(pos)) or "未见"
+
+
+def _active_dayun_brief(chart: Dict[str, Any], question_time: str) -> str:
+    bazi = chart.get("八字") or {}
+    dayun = bazi.get("大运") or {}
+    items = dayun.get("运程") or []
+    birth_text = str(chart.get("出生时间") or bazi.get("公历") or "").strip()
+    current_item = None
+    current_age = ""
+    try:
+        birth_dt = datetime.strptime(birth_text[:16], "%Y-%m-%d %H:%M")
+        query_dt = datetime.strptime(str(question_time or "")[:16], "%Y-%m-%d %H:%M")
+        age_months = (query_dt.year - birth_dt.year) * 12 + (query_dt.month - birth_dt.month)
+        if (query_dt.day, query_dt.hour, query_dt.minute) < (birth_dt.day, birth_dt.hour, birth_dt.minute):
+            age_months -= 1
+        current_age = f"当前约{max(0, age_months) / 12:.1f}岁"
+        for item in items:
+            start = item.get("起始年龄月数")
+            end = item.get("结束年龄月数")
+            if isinstance(start, int) and isinstance(end, int) and start <= age_months <= end:
+                current_item = item
+                break
+    except Exception:
+        current_item = None
+
+    start_note = _brief_json(dayun.get("起运"), 160)
+    direction = _safe_text(dayun.get("顺逆"), "")
+    if current_item:
+        return f"{direction}；起运{start_note}；{current_age}，当前大运{current_item.get('干支', '')}（{current_item.get('年龄', '')}）"
+    preview = "、".join(f"{i.get('干支', '')}({i.get('年龄', '')})" for i in items[:4])
+    return f"{direction}；起运{start_note}；大运序列{preview or '未见'}"
+
+
+def _subject_evidence_section(title: str, chart: Dict[str, Any], question_time: str) -> str:
+    bazi = chart.get("八字") or {}
+    ziwei = chart.get("紫微斗数") or {}
+    pillars = bazi.get("四柱") or {}
+    day_pillar = str(pillars.get("日柱") or "")
+    day_master = day_pillar[:1] or "未见"
+    strength = bazi.get("日主强弱") or {}
+    palace_names = ("命宫", "夫妻", "子女", "父母", "福德")
+    palace_parts = []
+    for palace in palace_names:
+        if ziwei and not ziwei.get("错误"):
+            palace_parts.append(_brief_json(_palace_summary(ziwei, palace), 260))
+    return "\n".join([
+        f"## {title}",
+        f"- 基础：{_safe_text(chart.get('性别'))}命，公历{_safe_text(bazi.get('公历') or chart.get('出生时间'))}，真太阳时{_safe_text(bazi.get('真太阳时'))}。",
+        f"- 八字：{_format_pillars(pillars)}；日主{day_master}{_safe_text(bazi.get('日主五行'), '')}{_safe_text(bazi.get('日主阴阳'), '')}，{_safe_text(strength.get('判断'))}。",
+        f"- 旺衰说明：{_safe_text(strength.get('说明'))}",
+        f"- 十神分布：{_brief_json(bazi.get('十神'), 760)}",
+        f"- 五行力量：{_brief_json(bazi.get('五行力量'), 360)}",
+        f"- 大运：{_active_dayun_brief(chart, question_time)}",
+        f"- 紫微基本：命宫{_safe_text(ziwei.get('命宫'))}，身宫{_safe_text(ziwei.get('身宫'))}，五行局{_safe_text(ziwei.get('五行局'))}，四化{_brief_json(ziwei.get('四化'), 260)}。",
+        f"- 紫微重点宫：{'；'.join(palace_parts) if palace_parts else '未见'}",
+    ])
+
+
+def _bazi_evidence_section(raw_bazi: Dict[str, Any]) -> str:
+    rows = raw_bazi.get("四柱对照") or []
+    table = ["| 柱位 | 第一命主 | 第二命主 | 关系 |", "|---|---|---|---|"]
+    for row in rows:
+        table.append(
+            f"| {row.get('柱位', '')} | {row.get('第一命主', '')} | {row.get('第二命主', '')} | {_brief_json(row.get('关系'), 220)} |"
+        )
+    return "\n".join([
+        "## 八字合盘",
+        "\n".join(table) if rows else "- 四柱对照：未见",
+        f"- 日主关系：{_brief_json(raw_bazi.get('日主关系'), 520)}",
+        f"- 五行互补：{_brief_json(raw_bazi.get('五行互补'), 360)}",
+        f"- 关系张力：{_safe_text(raw_bazi.get('关系张力评分'))}分，{_safe_text(raw_bazi.get('关系张力等级'))}。",
+    ])
+
+
+def _relationship_evidence_pack(compound_result: Dict[str, Any]) -> str:
+    meta = compound_result.get("元解释器") or {}
+    user_conc = meta.get("用户结论") or {}
+    raw = compound_result.get("原始盘要点") or {}
+    question_time = (compound_result.get("时空坐标") or {}).get("起卦时间", "")
+    identification = compound_result.get("关系识别盘") or {}
+    high_risk = (compound_result.get("综合验证") or {}).get("高风险主题", {})
+    sections = [
+        "# 关系盘证据包（字段已整理，非摘要）",
+        "## 问题与关系识别",
+        f"- 用户问题：{_safe_text(compound_result.get('问题'))}",
+        f"- 补充信息：{_safe_text(compound_result.get('补充信息'))}",
+        f"- 用户声明关系：{_safe_text(compound_result.get('用户声明关系') or identification.get('用户声明关系'))}",
+        f"- 起卦时空：{_brief_json(compound_result.get('时空坐标'), 360)}",
+        f"- 任务识别：{_brief_json(meta.get('问题识别'), 540)}",
+        f"- 关系识别盘：{_brief_json(identification, 1100)}",
+        f"- 系统候选判断：{_brief_json({k: user_conc.get(k) for k in ('一句话结论', '直接回答', '现实身份层', '情感状态层', '关系质量层', '最像关系', '候选关系排行', '不像关系', '当前状态', '长期稳定性', '发展趋势')}, 1200)}",
+        _subject_evidence_section("第一命主个体盘", compound_result.get("第一命主") or {}, question_time),
+        _subject_evidence_section("第二命主个体盘", compound_result.get("第二命主") or {}, question_time),
+        _bazi_evidence_section(raw.get("八字合盘") or {}),
+        "## 紫微合盘",
+        f"- 评分：{_safe_text((raw.get('紫微合盘') or {}).get('紫微合盘评分'))}分，{_safe_text((raw.get('紫微合盘') or {}).get('紫微合盘等级'))}。",
+        f"- 互动线索：{_brief_json((raw.get('紫微合盘') or {}).get('互动线索'), 780)}",
+        f"- 第一命主重点宫：命宫{_brief_json((raw.get('紫微合盘') or {}).get('第一命主命宫'), 360)}；夫妻宫{_brief_json((raw.get('紫微合盘') or {}).get('第一命主夫妻宫'), 360)}",
+        f"- 第二命主重点宫：命宫{_brief_json((raw.get('紫微合盘') or {}).get('第二命主命宫'), 360)}；夫妻宫{_brief_json((raw.get('紫微合盘') or {}).get('第二命主夫妻宫'), 360)}",
+        "## 当前问事盘：六爻",
+        f"- 盘面：{_brief_json(raw.get('六爻'), 1300)}",
+        "## 当前问事盘：奇门遁甲",
+        f"- 盘面：{_brief_json(raw.get('奇门遁甲'), 1400)}",
+        "## 当前问事盘：梅花易数",
+        f"- 盘面：{_brief_json(raw.get('梅花易数'), 1300)}",
+        "## 当前问事盘：大六壬",
+        f"- 盘面：{_brief_json(raw.get('大六壬'), 1500)}",
+        "## 关系复合卦",
+        f"- 盘面：{_brief_json(raw.get('关系复合卦'), 1300)}",
+        "## 交叉验证素材",
+        f"- 权重调度：{_brief_json(meta.get('权重调度'), 520)}",
+        f"- 各术数语义标签：{_brief_json(meta.get('各术数语义标签'), 1400)}",
+        f"- 六层语义汇总：{_brief_json(meta.get('任务语义汇总'), 900)}",
+        f"- 综合断语：{_brief_json(meta.get('综合断语'), 1200)}",
+        f"- 风险提示：{_brief_json(high_risk, 520)}",
+    ]
+    return "\n".join(section for section in sections if section)
+
+
+def _relationship_followup_history(history: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    recent = list(history or [])[-6:]
+    return _compact_prompt_value(recent, depth=3, dict_limit=6, list_limit=6, string_limit=240)
+
+
+RELATIONSHIP_DETAILED_PROMPT = """【术数详断模式】
+本轮要求在长文专家基础上进一步展开每个术数的内部推演。不要只给关系结论，要把各术数为什么这样断讲清楚。
+各术数章节必须按“关键盘面依据 / 术数象意 / 吉凶与风险 / 对两人关系的独立结论”展开。
+八字：详写四柱对照、日主十神、冲合刑害、五行互补、关系张力与长期结构。
+紫微：详写命宫、夫妻宫、子女宫、父母宫、福德宫等关系宫位，说明星曜四化如何牵动关系质量。
+六爻：详写卦名宫属、世应、六亲、动爻、旬空月破、用神状态，说明当前谁主动、谁受压、哪里有变数。
+奇门：详写值符值使、关键宫、门星神干、六合玄武白虎等关系信号，说明行为路径、阻力与暗线。
+梅花：详写本卦互卦变卦、动爻、体用生克，说明短期趋势与关系转化方向。
+大六壬：详写双方行年盘、四课三传、天将、空亡落传，说明事件起因、发展和结果链。
+关系复合卦：详写本卦互卦变卦、动爻、体用和爻义，说明双人关系场是增益、阻滞还是消耗。
+交叉验证必须说明：哪些术数互相印证，哪些术数互相牵制，哪些只作辅证。"""
+
+
+def _normalize_relationship_detail_mode(detail_mode: str = "expert") -> str:
+    mode = str(detail_mode or "expert").strip().lower()
+    if mode in {"detailed", "detail", "术数详断", "shushu", "deep"}:
+        return "detailed"
+    return "expert"
+
+
+def _build_relationship_prompt(
+    compound_result: Dict[str, Any],
+    *,
+    message: str = "",
+    history: Optional[List[Dict[str, Any]]] = None,
+    detail_mode: str = "expert",
+) -> str:
+    mode = _normalize_relationship_detail_mode(detail_mode)
+    evidence_pack = _relationship_evidence_pack(compound_result)
+    parts = [
+        RELATIONSHIP_LONGFORM_PROMPT,
+        "你是一位传统术数关系合盘解读助手。请只基于下面的关系盘证据包解读，不要重新起卦，不要编造证据包中没有的卦名、四柱、星曜、世应、动爻、三传或体用。"
+    ]
+    if mode == "detailed":
+        parts.append(RELATIONSHIP_DETAILED_PROMPT)
+    if message:
+        parts.append(f"本轮追问/补充事实：{message.strip()}")
+    if history:
+        parts.append(f"已有追问记录（用于理解本轮语境，不可覆盖原盘）：{json.dumps(_relationship_followup_history(history), ensure_ascii=False, separators=(',', ':'), default=str)}")
+    parts.append(evidence_pack)
+    parts.append(
+        "解读要求：先写盘面总览，再逐术数展开，最后综合验证；原始盘优先于元解释器，证据包里的原始盘面优先于系统候选判断；"
+        "现实身份层、情感状态层、关系质量层必须分开写。若补充事实已经给出现实关系，只能把它作为现实身份层前提，不得用盘面反向否定；"
+        "每个术数段必须有术数断语、盘面解释、关系落点和独立判断，信息要足，不要压缩成摘要。"
+    )
+    parts.append(
+        "输出格式：必须使用以下标题：# 【问题与关系识别】 / # 【第一命主个体盘】 / # 【第二命主个体盘】 / # 【八字合盘】 / # 【紫微合盘】 / # 【关系识别盘】 / # 【当前问事盘：六爻】 / # 【当前问事盘：奇门遁甲】 / # 【当前问事盘：梅花易数】 / # 【当前问事盘：大六壬】 / # 【关系复合卦】 / # 【交叉验证】 / # 【最终判断】 / # 【置信度】 / # 【行动建议】"
+    )
+    parts.append(
+        "写法要求：不要再写成“内容/论断”两行摘要。每段用自然长文或要点展开：先交代盘面是什么，再解释术数象意，再说明为什么这样断。"
+        "结论必须明确，必要时可说证据不足，但不能用证据不足替代分析；最终判断必须分成现实身份层、情感状态层、关系质量层。"
+    )
+    return "\n".join(parts)
+
+
+def generate_relationship_prompt(compound_result):
+    return _build_relationship_prompt(compound_result)
 
 
 def generate_relationship_followup_prompt(
     compound_result: Dict[str, Any],
     message: str,
     history: Optional[List[Dict[str, Any]]] = None,
+    detail_mode: str = "expert",
 ) -> str:
     message = str(message or "").strip()
-    history = history or []
-    prompt = '你是一位传统术数关系合盘解读助手。现在用户在同一张关系复合盘下继续追问或补充事实。\n\n'
-    prompt += '# 本轮追问/补充事实\n'
-    prompt += message + '\n\n'
-    if history:
-        prompt += '# 已有追问记录\n'
-        prompt += json.dumps(history[-6:], ensure_ascii=False, indent=2, default=str) + '\n\n'
-    prompt += '# 原始关系复合盘\n'
-    prompt += json.dumps(compound_result, ensure_ascii=False, indent=2, default=str) + '\n\n'
-    prompt += '# 硬性规则\n'
-    prompt += '1. 本轮是“沿用原盘继续解读”，不得重新起卦，不得改变原盘中的起卦时间、六爻卦名、世应、动爻、奇门局、梅花卦、大六壬三传和关系复合卦。\n'
-    prompt += '2. 用户补充事实优先用于修正现实语境；不能用盘面反向否定用户已说明的现实关系。\n'
-    prompt += '3. 若追问只是补充身份、背景、阻力来源或对方态度，必须在原盘各术数信号内解释，不要要求用户重新起盘。\n'
-    prompt += '4. 只有用户明确提出新的独立时效问题，例如“未来三个月会不会复合/是否结婚/是否联系”，才提醒可另起追问卦；本轮仍先按原盘给可回答部分。\n'
-    prompt += '5. 大年龄差、同性未声明婚恋、亲子或照护语境下，妻财、官鬼、六合、天后优先解释为资源、责任、照护、管束、依赖、权责或往来，不默认写成暧昧/恋人。\n'
-    prompt += '6. 输出要短于完整解盘，重点回答用户本轮问题；如补充事实改变了关系画像，需要给出“修正后的最终判断”。\n'
-    prompt += '7. 用户追问原文不得改写、净化或替换；即使表达粗俗，也按原文识别并直接回答，但涉及亲密/性关系时必须保留双方自愿、边界和风险提示。\n'
-    prompt += '8. 若用户补充“这是夫妻/亲子/同事”等现实关系，只能把它作为现实身份层前提；不得用冲突、阻滞、消耗等质量标签反向否定身份，也不得抹掉原盘中的亲密/照护/权责信号。\n'
-    prompt += '9. 修正结论必须分成三层：“现实身份层 / 情感状态层 / 关系质量层”。\n'
-    prompt += '10. 若原盘带有“六十四卦语义”，只可把它当作候选义筛选器，必须结合本轮补充事实与原盘选出 2-3 个最强解释，不可重新起义或机械抄全量候选义。\n'
-    prompt += '11. 输出格式必须稳定：每段都按“## 标题 / **内容：** / **论断：**”写；论断必须加粗。\n\n'
-    prompt += '# 输出格式\n'
-    prompt += '## 追问识别\n**内容：** 说明本轮是补充事实、同盘追问，还是建议另起追问卦。\n**论断：** **一句话说明是否沿用原盘。**\n'
-    prompt += '## 同盘回答\n**内容：** 直接回答用户本轮问题，保留用户追问原意，不替换用户问题。\n**论断：** **给出本轮最关键判断。**\n'
-    prompt += '## 原盘依据\n**内容：** 列出 3-6 条对应的原盘证据。\n**论断：** **说明这些证据共同指向什么。**\n'
-    prompt += '## 修正结论\n**内容：** 必须分行写：现实身份层、情感状态层、关系质量层；如未改变关系画像，则说明原结论保持。\n**论断：** **给出修正或维持后的最终判断。**\n'
-    prompt += '## 下一步\n**内容：** 只给 1-3 条具体建议或下一追问方向。\n**论断：** **点明下一步最该做什么。**\n'
-    return prompt
+    return _build_relationship_prompt(compound_result, message=message, history=history or [], detail_mode=detail_mode)
 
 
 def stream_relationship_followup(
@@ -2594,6 +2691,7 @@ def stream_relationship_followup(
     system_prompt: str = "",
     provider_type: str = "openai_compatible",
     lenient_mode: bool = False,
+    detail_mode: str = "expert",
 ):
     system_msg = system_prompt or "你是一位严谨、客观的传统术数关系合盘分析顾问。"
     system_msg = f"{system_msg.rstrip()}\n\n{FINAL_ANSWER_PROMPT.strip()}"
@@ -2603,19 +2701,32 @@ def stream_relationship_followup(
         {"role": "system", "content": system_msg},
         {
             "role": "user",
-            "content": f"{NO_THINK_USER_PREFIX}\n{generate_relationship_followup_prompt(compound_result, message, history)}",
+            "content": f"{NO_THINK_USER_PREFIX}\n{generate_relationship_followup_prompt(compound_result, message, history, detail_mode=detail_mode)}",
         },
     ]
     if provider_type == "ollama_native":
-        yield from _stream_ollama_native(messages, api_key, base_url, model)
+        yield from _stream_ollama_native(
+            messages,
+            api_key,
+            base_url,
+            model,
+            num_predict=RELATIONSHIP_FOLLOWUP_MAX_TOKENS,
+        )
     else:
-        yield from _stream_openai_compatible(messages, api_key, base_url, model)
+        yield from _stream_openai_compatible(
+            messages,
+            api_key,
+            base_url,
+            model,
+            max_tokens=RELATIONSHIP_FOLLOWUP_MAX_TOKENS,
+        )
 
 
 def build_relationship_messages(
     compound_result: Dict[str, Any],
     system_prompt: str = "",
     lenient_mode: bool = False,
+    detail_mode: str = "expert",
 ) -> List[Dict[str, str]]:
     system_msg = system_prompt or "你是一位严谨、客观的传统术数关系合盘分析顾问。"
     system_msg = f"{system_msg.rstrip()}\n\n{FINAL_ANSWER_PROMPT.strip()}"
@@ -2623,7 +2734,7 @@ def build_relationship_messages(
         system_msg = f"{system_msg.rstrip()}\n\n{LENIENT_MODE_PROMPT.strip()}"
     return [
         {"role": "system", "content": system_msg},
-        {"role": "user", "content": f"{NO_THINK_USER_PREFIX}\n{generate_relationship_prompt(compound_result)}"},
+        {"role": "user", "content": f"{NO_THINK_USER_PREFIX}\n{_build_relationship_prompt(compound_result, detail_mode=detail_mode)}"},
     ]
 
 
@@ -2635,9 +2746,22 @@ def stream_relationship_interpret(
     system_prompt: str = "",
     provider_type: str = "openai_compatible",
     lenient_mode: bool = False,
+    detail_mode: str = "expert",
 ):
-    messages = build_relationship_messages(compound_result, system_prompt, lenient_mode)
+    messages = build_relationship_messages(compound_result, system_prompt, lenient_mode, detail_mode=detail_mode)
     if provider_type == "ollama_native":
-        yield from _stream_ollama_native(messages, api_key, base_url, model)
+        yield from _stream_ollama_native(
+            messages,
+            api_key,
+            base_url,
+            model,
+            num_predict=RELATIONSHIP_INTERPRET_MAX_TOKENS,
+        )
     else:
-        yield from _stream_openai_compatible(messages, api_key, base_url, model)
+        yield from _stream_openai_compatible(
+            messages,
+            api_key,
+            base_url,
+            model,
+            max_tokens=RELATIONSHIP_INTERPRET_MAX_TOKENS,
+        )

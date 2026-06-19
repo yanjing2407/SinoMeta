@@ -235,6 +235,14 @@ pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);border:1px s
           <div style="font-size:.82rem;color:var(--text-dim)"><strong style="display:block;color:var(--text)">本地宽松模式</strong><span id="lenientModeHint">仅本地模型可用，减少合法内容误拒</span></div>
           <label class="toggle"><input type="checkbox" id="lenientMode">启用</label>
         </div>
+        <div style="margin:12px 0">
+          <label style="display:block;font-size:.85rem;color:var(--text-dim);margin-bottom:6px">解读深度</label>
+          <div class="method-group" id="relationshipDetailModeGroup">
+            <button class="method-btn active" data-val="expert" onclick="setRelationshipDetailMode(this)">专家长文</button>
+            <button class="method-btn" data-val="detailed" onclick="setRelationshipDetailMode(this)">术数详断</button>
+          </div>
+          <div style="font-size:.75rem;color:var(--text-dim);margin-top:4px">术数详断会逐术数展开推演，输出更长，也会更慢。</div>
+        </div>
         <div class="btn-row">
           <button class="btn btn-primary" id="btnInterpret" onclick="doInterpret()">专家解读</button>
           <button class="btn" onclick="copyInterpretText()">复制解读</button>
@@ -272,6 +280,11 @@ function $(id){return document.getElementById(id)}
 function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500)}
 function escapeHTML(text){return String(text??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}
 function renderMarkdown(text){if(window.marked&&window.DOMPurify){return DOMPurify.sanitize(marked.parse(text||''))}return escapeHTML(text||'').replace(/\n/g,'<br>')}
+function setRelationshipDetailMode(el){
+  document.querySelectorAll('#relationshipDetailModeGroup .method-btn').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');
+  relationshipDetailMode=el.dataset.val||'expert';
+}
 function pad(n){return String(n).padStart(2,'0')}
 function refreshTime(){const d=new Date();$('q_date').value=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;$('q_time').value=`${pad(d.getHours())}:${pad(d.getMinutes())}`}
 function initGeoLocation(){
@@ -313,7 +326,7 @@ function buildRequest(){
   }catch(e){toast(e.message);return null}
 }
 
-let lastRequest=null,lastRequestKey='',lastSubjectKey='',formDirty=false,lastResult=null,lastAiText='',lastFollowupText='',followupHistory=[],roles=[],selectedRoleId=null,activeStreamController=null;
+let lastRequest=null,lastRequestKey='',lastSubjectKey='',formDirty=false,lastResult=null,lastAiText='',lastFollowupText='',followupHistory=[],roles=[],selectedRoleId=null,activeStreamController=null,relationshipDetailMode='expert';
 function stableStringify(value){
   if(value===null||typeof value!=='object')return JSON.stringify(value);
   if(Array.isArray(value))return '['+value.map(stableStringify).join(',')+']';
@@ -666,7 +679,7 @@ async function doInterpret(){
   if(!selectedRoleId){toast('请先选择角色');return}
   const btn=$('btnInterpret');btn.disabled=true;btn.textContent='解读中...';
   try{
-    const body={...lastRequest,role_id:selectedRoleId,lenient_mode:!!$('lenientMode').checked};
+    const body={...lastRequest,role_id:selectedRoleId,lenient_mode:!!$('lenientMode').checked,detail_mode:relationshipDetailMode};
     await streamSSE('/api/relationship/interpret',body,$('aiResult'));
   }catch(e){$('aiResult').innerHTML=`<div class="error-box">AI 请求失败<br>${escapeHTML(e.message)}</div>`;toast('解读失败')}
   finally{btn.disabled=false;btn.textContent='专家解读'}
@@ -679,7 +692,7 @@ async function doFollowup(){
   const btn=$('btnFollowup');btn.disabled=true;btn.textContent='追问解读中...';
   const original=lastAiText;
   try{
-    const body={chart:lastResult,message:msg,history:followupHistory,role_id:selectedRoleId,lenient_mode:!!$('lenientMode').checked};
+    const body={chart:lastResult,message:msg,history:followupHistory,role_id:selectedRoleId,lenient_mode:!!$('lenientMode').checked,detail_mode:relationshipDetailMode};
     const prefix=`${original||''}${original?'\n\n---\n\n':''}## 追问\n${msg}\n\n`;
     const answer=await streamSSE('/api/relationship/followup',body,$('aiResult'),{prefixText:prefix,updateLastAiText:false});
     followupHistory.push({问题:msg,回答:answer});
