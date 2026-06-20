@@ -20,6 +20,7 @@ from liuyao import pa_pan_by_time as liuyao_pa_pan, pa_pan_by_numbers as liuyao_
 from meihua import pa_pan as meihua_pa_pan
 from ziwei import pa_pan as ziwei_pa_pan
 from daliuren import pa_pan as daliuren_pa_pan
+from single_interpret_rules import build_event_guard
 
 
 logger = logging.getLogger("sinometa")
@@ -188,9 +189,13 @@ def generate_prompt(multi_result: dict, mode: str = 'concise') -> str:
     result_text = json.dumps(results, ensure_ascii=False, indent=2, default=str)
 
     if mode == 'expert':
-        return _generate_expert_prompt(event, st, results, result_text)
+        prompt = _generate_expert_prompt(event, st, results, result_text)
     else:
-        return _generate_concise_prompt(event, st, results, result_text)
+        prompt = _generate_concise_prompt(event, st, results, result_text)
+    guard = build_event_guard(event, results.keys())
+    if guard:
+        prompt += f"\n\n{guard}\n"
+    return prompt
 
 
 def _format_time_coord(st: dict) -> str:

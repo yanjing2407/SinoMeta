@@ -124,6 +124,43 @@ def test_expert_prompt_requires_all_method_sections():
     print("PASS: test_expert_prompt_requires_all_method_sections")
 
 
+def test_single_interpret_event_rule_cards():
+    from integrate import generate_prompt
+    from single_interpret_rules import detect_event_types, build_event_guard
+
+    divorce_sample = {
+        '事件': '会离婚吗？',
+        '时空坐标': {'时间': '2026-06-19 22:56', '经度': 118.0, '纬度': 36.8},
+        '术数结果': {'六爻': {}, '大六壬': {}, '奇门遁甲': {}, '八字': {}},
+    }
+    overtime_sample = {
+        '事件': '我明天会加班吗？',
+        '时空坐标': {'时间': '2026-06-19 22:56', '经度': 118.0, '纬度': 36.8},
+        '术数结果': {'六爻': {}, '奇门遁甲': {}, '梅花易数': {}},
+    }
+
+    divorce_types = detect_event_types(divorce_sample['事件'])
+    overtime_types = detect_event_types(overtime_sample['事件'])
+    divorce_prompt = generate_prompt(divorce_sample, mode='expert')
+    overtime_prompt = generate_prompt(overtime_sample, mode='concise')
+    guard = build_event_guard('会离婚吗？', ['六爻'])
+
+    assert 'relationship/general' in divorce_types
+    assert 'relationship/marriage_divorce' in divorce_types
+    assert '婚姻解除类判断卡' in divorce_prompt
+    assert '凶象只能作为风险信号' in divorce_prompt
+    assert '不得把多个“同类凶象”简单相加' in divorce_prompt
+    assert '【六爻视角】' in divorce_prompt
+    assert '命中规则：common、relationship/general、relationship/marriage_divorce' in guard
+
+    assert 'short_term_event' in overtime_types
+    assert 'career/general' in overtime_types
+    assert '短期具体事件判断卡' in overtime_prompt
+    assert '事业工作类通用判断卡' in overtime_prompt
+    assert '不要把短期事件扩大成长期命运判断' in overtime_prompt
+    print("PASS: test_single_interpret_event_rule_cards")
+
+
 def test_openai_excludes_reasoning_content():
     from integrate import _build_openai_payload, _extract_openai_content
     import json
@@ -1111,6 +1148,7 @@ if __name__ == '__main__':
     test_lenient_mode_prompt()
     test_dual_time_prompt_modes()
     test_expert_prompt_requires_all_method_sections()
+    test_single_interpret_event_rule_cards()
     test_openai_excludes_reasoning_content()
     test_admin_provider_renderer_uses_provider_var()
     test_frontend_initial_load_retries()
